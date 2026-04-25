@@ -1,0 +1,26 @@
+# Build artifacts
+TranslatorApp/Skald.app/
+TranslatorApp/Translator.app/
+TranslatorApp/build/
+TranslatorApp/dist/
+
+# Claude Code session state
+.claude/
+
+# macOS metadata
+.DS_Store
+*.swp
+.AppleDouble
+
+# Xcode (if anyone opens it as a project later)
+xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+
+# Local signing artifacts
+*.p12
+*.pem
+
+# Editor
+.vscode/
+.idea/

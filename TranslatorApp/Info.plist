@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Skald</string>
+    <key>CFBundleDisplayName</key>
+    <string>Skald</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.ivshestakov.skald</string>
+    <key>CFBundleExecutable</key>
+    <string>Skald</string>
+    <key>CFBundleIconFile</key>
+    <string>Skald</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.productivity</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSSupportsAutomaticTermination</key>
+    <false/>
+    <key>NSSupportsSuddenTermination</key>
+    <false/>
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2026 Ivan Shestakov. Released under the MIT License.</string>
+
+    <!--
+      Sparkle auto-updates. Both keys must be set before shipping a
+      public release:
+
+      • SUFeedURL  : HTTPS URL of the appcast.xml. Example for GitHub
+                     Pages: https://ivshestakov.github.io/skald/appcast.xml
+      • SUPublicEDKey : Base64 EdDSA public key generated once via
+                        `Frameworks/Sparkle.framework/Versions/Current/../../bin/generate_keys`.
+                        Keep the private key safe — it signs every
+                        release. See RELEASE.md for the full procedure.
+    -->
+    <key>SUFeedURL</key>
+    <string>https://ivshestakov.github.io/skald.app/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string></string>
+    <!-- Disabled until SUPublicEDKey is set and the appcast is actually
+         hosted. Re-enable in 0.2 when GitHub Pages is wired up.
+         "Check for Updates…" in the menu still works manually. -->
+    <key>SUEnableAutomaticChecks</key>
+    <false/>
+</dict>
+</plist>
