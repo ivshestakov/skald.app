@@ -28,24 +28,30 @@ and never touches your text unless you explicitly trigger a translation.
 
 ## Install
 
-Skald requires macOS 13 (Ventura) or newer. Apple on-device translation
-requires macOS 15 (Sequoia) or newer.
+Skald requires macOS 15 (Sequoia) or newer.
 
 ### From a release (recommended)
 
-Download the latest `Skald.app.zip` from the [Releases](#) page, unzip,
-and drag `Skald.app` into `/Applications`.
+Download the latest `Skald-<version>.zip` from the
+[Releases page](https://github.com/ivshestakov/skald.app/releases/latest),
+unzip, and drag `Skald.app` into `/Applications`.
 
-The first time you launch, macOS Gatekeeper may warn that the app is from
-an unidentified developer. Right-click `Skald.app` → **Open** to confirm.
+The first time you launch, macOS Gatekeeper will warn that the app is from
+an unidentified developer (Skald is currently distributed under a
+self-signed certificate; an Apple Developer ID is on the roadmap).
+**Right-click** `Skald.app` → **Open** → **Open** to confirm — only
+required once.
+
+For the full first-run walkthrough (Accessibility grant, API keys),
+see [INSTALL.md](INSTALL.md).
 
 ### Build from source
 
 You only need Xcode Command Line Tools (no full Xcode required).
 
 ```bash
-git clone https://github.com/<your-org>/skald.git
-cd skald/TranslatorApp
+git clone https://github.com/ivshestakov/skald.app.git
+cd skald.app/TranslatorApp
 ./build.sh
 cp -R Skald.app /Applications/
 open -a Skald
@@ -86,7 +92,7 @@ DeepL free-tier keys end in `:fx`; Skald detects this and routes to
   your inputs anywhere.
 - Source-language detection uses Apple's on-device Natural Language
   framework — also offline.
-- API keys live in the macOS Keychain (`com.ivshestakov.skald` service).
+- API keys live in the macOS Keychain (`com.ivshestakov.skald.v2` service).
 
 Skald has no analytics, no telemetry, no crash reporting beyond the
 default macOS crash reports.
