@@ -23,7 +23,11 @@ and never touches your text unless you explicitly trigger a translation.
   Spanish, Italian, Portuguese, Polish, Dutch, Chinese, Japanese, Korean.
   Source language is auto-detected via Apple's on-device Natural Language
   framework.
-- **Customisable hotkey**: defaults to ⌥/, change to anything in Settings.
+- **Two customisable hotkeys**:
+  - `⌥/` opens the glass input panel — type a phrase, hit Enter, paste.
+  - `⌥`` (option-backtick) **quick-translates in place**: if you have
+    text selected, the selection is replaced with its translation;
+    otherwise the clipboard is translated and pasted at the cursor.
 - **API keys are stored in the macOS Keychain**, not in plain text.
 
 ## Install

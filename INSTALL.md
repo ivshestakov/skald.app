@@ -47,10 +47,18 @@ Claude or DeepL via the menu-bar icon → **Settings… → Model**:
 Keys are stored in the macOS Keychain (`com.ivshestakov.skald.v2`
 service) and are never sent anywhere except the engine you've selected.
 
-## Customising the hotkey
+## Hotkeys
 
-Settings… → **Shortcuts** → click the box, press the new combination
-(must include at least one modifier — `⌘ ⌥ ⌃ ⇧`).
+Skald has two hotkeys, both customisable in
+**Settings… → Shortcuts**:
+
+| Default | Action |
+| --- | --- |
+| `⌥/` | Open the glass input panel. Type a phrase, hit Enter — translation is pasted at your cursor. |
+| `` ⌥` `` | Quick-translate in place. If text is selected, the selection is replaced with its translation. Otherwise the current clipboard is translated and pasted at the cursor. |
+
+Click a recorder box, press the new combination (must include at least
+one modifier — `⌘ ⌥ ⌃ ⇧`). Press Esc to cancel a recording.
 
 ## Auto-launch
 

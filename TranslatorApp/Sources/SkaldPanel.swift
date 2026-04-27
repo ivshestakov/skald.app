@@ -584,33 +584,18 @@ final class SkaldPanel: NSObject {
     private func pasteBack(_ text: String) {
         // Because the panel is .nonactivatingPanel, our process never stole
         // frontmost status — the user's original app is still frontmost,
-        // so ⌘V goes directly to them. A tiny delay lets the panel fully
-        // order out before we start synthesising keystrokes.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            let pb = NSPasteboard.general
-            let oldContents = pb.string(forType: .string)
+        // so ⌘V goes directly to them.
+        let oldClipboard = NSPasteboard.general.string(forType: .string)
 
-            pb.clearContents()
-            pb.setString(text, forType: .string)
-
-            // CGEvent key synthesis only works if our process is trusted
-            // for Accessibility. Ad-hoc signed builds get a fresh TCC
-            // identity on every rebuild, so we re-check at runtime.
-            if AXIsProcessTrusted() {
-                Self.sendCmdV()
-                // Restore clipboard after the paste has had time to land.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    if let old = oldContents {
-                        pb.clearContents()
-                        pb.setString(old, forType: .string)
-                    }
-                }
-            } else {
-                // Leave the translation on the clipboard so nothing is lost,
-                // and tell the user exactly what needs to happen.
-                Self.showAccessibilityAlert()
-            }
+        guard AXIsProcessTrusted() else {
+            // Leave the translation on the clipboard so nothing is lost,
+            // and tell the user exactly what needs to happen.
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            Self.showAccessibilityAlert()
+            return
         }
+        Pasteboard.pasteAndRestore(text: text, restoreClipboard: oldClipboard)
     }
 
     private static func showAccessibilityAlert() {
@@ -632,17 +617,6 @@ final class SkaldPanel: NSObject {
            let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(url)
         }
-    }
-
-    private static func sendCmdV() {
-        let src = CGEventSource(stateID: .combinedSessionState)
-        // 0x37 = cmd, 0x09 = v
-        let down = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: true)
-        let up   = CGEvent(keyboardEventSource: src, virtualKey: 0x09, keyDown: false)
-        down?.flags = .maskCommand
-        up?.flags   = .maskCommand
-        down?.post(tap: .cghidEventTap)
-        up?.post(tap: .cghidEventTap)
     }
 
     // MARK: click-outside-to-dismiss

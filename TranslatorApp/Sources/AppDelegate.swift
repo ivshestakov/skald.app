@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private var statusItem: NSStatusItem!
     private var hotKey: HotKey?
+    private var hotKey2: HotKey?
     private let panel = SkaldPanel()
     private var settingsWC: SettingsWindowController?
 
@@ -102,14 +103,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func registerHotKey() {
-        hotKey = nil   // unregisters via deinit
+        hotKey  = nil   // unregisters via deinit
+        hotKey2 = nil
+
         let kc   = UInt32(Settings.shared.hotkeyKeyCode)
         let mods = Self.carbonModifiers(from: Settings.shared.hotkeyModifiers)
         hotKey = HotKey(keyCode: kc, modifiers: mods) { [weak self] in
             self?.showPanel()
         }
         if hotKey == nil {
-            NSLog("Skald: failed to register hotkey. Is another app holding it?")
+            NSLog("Skald: failed to register primary hotkey. Is another app holding it?")
+        }
+
+        let kc2   = UInt32(Settings.shared.hotkey2KeyCode)
+        let mods2 = Self.carbonModifiers(from: Settings.shared.hotkey2Modifiers)
+        hotKey2 = HotKey(keyCode: kc2, modifiers: mods2) {
+            QuickTranslator.run()
+        }
+        if hotKey2 == nil {
+            NSLog("Skald: failed to register quick-translate hotkey.")
         }
     }
 

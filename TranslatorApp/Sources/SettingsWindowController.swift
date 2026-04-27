@@ -451,44 +451,57 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private func buildShortcutsView() -> NSView {
         let root = NSView()
 
-        let label = NSTextField(labelWithString: "Open the input panel")
-        label.font = .systemFont(ofSize: 13)
-        label.textColor = .labelColor
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.setContentHuggingPriority(.defaultLow, for: .horizontal)
-
-        let recorder = ShortcutRecorderView(
-            keyCode:     Settings.shared.hotkeyKeyCode,
-            modifiers:   Settings.shared.hotkeyModifiers,
-            displayChar: Settings.shared.hotkeyDisplay
+        // ── Row 1: open the input panel
+        let row1 = makeShortcutRow(
+            label: "Open the input panel",
+            keyCode: Settings.shared.hotkeyKeyCode,
+            modifiers: Settings.shared.hotkeyModifiers,
+            display: Settings.shared.hotkeyDisplay,
+            onChange: { kc, mods, disp in
+                Settings.shared.hotkeyKeyCode  = kc
+                Settings.shared.hotkeyModifiers = mods
+                Settings.shared.hotkeyDisplay  = disp
+                (NSApp.delegate as? AppDelegate)?.reloadHotKey()
+            }
         )
-        recorder.translatesAutoresizingMaskIntoConstraints = false
-        recorder.onChange = { keyCode, modifiers, display in
-            Settings.shared.hotkeyKeyCode  = keyCode
-            Settings.shared.hotkeyModifiers = modifiers
-            Settings.shared.hotkeyDisplay  = display
-            (NSApp.delegate as? AppDelegate)?.reloadHotKey()
-        }
-
-        let row = NSStackView(views: [label, recorder])
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.distribution = .fill
-        row.spacing = 12
-        row.translatesAutoresizingMaskIntoConstraints = false
-
-        let hint = NSTextField(wrappingLabelWithString:
-            "Click the box, then press the new combination. Must include at least one modifier "
-            + "(⌘ ⌥ ⌃ ⇧). Press Esc to cancel."
+        let hint1 = NSTextField(wrappingLabelWithString:
+            "Brings up the glass panel — type a phrase, press Enter to translate and paste."
         )
-        hint.font = .systemFont(ofSize: 11)
-        hint.textColor = .secondaryLabelColor
-        hint.translatesAutoresizingMaskIntoConstraints = false
+        styleHintBody(hint1)
 
-        let stack = NSStackView(views: [row, hint, NSView()])
+        // ── Row 2: quick translate (selection / clipboard)
+        let row2 = makeShortcutRow(
+            label: "Quick translate (selection / clipboard)",
+            keyCode: Settings.shared.hotkey2KeyCode,
+            modifiers: Settings.shared.hotkey2Modifiers,
+            display: Settings.shared.hotkey2Display,
+            onChange: { kc, mods, disp in
+                Settings.shared.hotkey2KeyCode  = kc
+                Settings.shared.hotkey2Modifiers = mods
+                Settings.shared.hotkey2Display  = disp
+                (NSApp.delegate as? AppDelegate)?.reloadHotKey()
+            }
+        )
+        let hint2 = NSTextField(wrappingLabelWithString:
+            "Press without showing the panel: if text is selected it's translated and replaced "
+            + "in place; otherwise the current clipboard is translated and pasted at the cursor."
+        )
+        styleHintBody(hint2)
+
+        // ── Footer hint
+        let footer = NSTextField(wrappingLabelWithString:
+            "Click a box to record, press the new combination. Must include at least one "
+            + "modifier (⌘ ⌥ ⌃ ⇧). Press Esc to cancel a recording."
+        )
+        styleHintBody(footer)
+        footer.textColor = NSColor.tertiaryLabelColor
+
+        let stack = NSStackView(views: [row1, hint1, row2, hint2, footer, NSView()])
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 12
+        stack.spacing = 8
+        stack.setCustomSpacing(20, after: hint1)
+        stack.setCustomSpacing(20, after: hint2)
         stack.translatesAutoresizingMaskIntoConstraints = false
         root.addSubview(stack)
 
@@ -498,11 +511,50 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             stack.topAnchor.constraint(equalTo: root.topAnchor,           constant: 24),
             stack.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -24),
 
-            row.widthAnchor.constraint(equalTo: stack.widthAnchor),
-            hint.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            row1.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            row2.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            hint1.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            hint2.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            footer.widthAnchor.constraint(equalTo: stack.widthAnchor),
         ])
 
         return root
+    }
+
+    private func makeShortcutRow(
+        label: String,
+        keyCode: Int,
+        modifiers: NSEvent.ModifierFlags,
+        display: String,
+        onChange: @escaping (Int, NSEvent.ModifierFlags, String) -> Void
+    ) -> NSStackView {
+        let title = NSTextField(labelWithString: label)
+        title.font = .systemFont(ofSize: 13)
+        title.textColor = .labelColor
+        title.translatesAutoresizingMaskIntoConstraints = false
+        title.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let recorder = ShortcutRecorderView(
+            keyCode: keyCode,
+            modifiers: modifiers,
+            displayChar: display
+        )
+        recorder.translatesAutoresizingMaskIntoConstraints = false
+        recorder.onChange = onChange
+
+        let row = NSStackView(views: [title, recorder])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.distribution = .fill
+        row.spacing = 12
+        row.translatesAutoresizingMaskIntoConstraints = false
+        return row
+    }
+
+    private func styleHintBody(_ field: NSTextField) {
+        field.font = .systemFont(ofSize: 11)
+        field.textColor = .secondaryLabelColor
+        field.translatesAutoresizingMaskIntoConstraints = false
     }
 
     private func makeRow(label: String, field: NSView) -> NSStackView {

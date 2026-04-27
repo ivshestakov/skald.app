@@ -230,9 +230,12 @@ final class Settings {
         static let secondaryLang   = "skald.secondaryLanguage"
         static let adaptStyle      = "skald.adaptStyleEnabled"
         static let tone            = "skald.tone"
-        static let hotkeyKeyCode   = "skald.hotkeyKeyCode"
-        static let hotkeyModifiers = "skald.hotkeyModifiers"
-        static let hotkeyDisplay   = "skald.hotkeyDisplay"
+        static let hotkeyKeyCode    = "skald.hotkeyKeyCode"
+        static let hotkeyModifiers  = "skald.hotkeyModifiers"
+        static let hotkeyDisplay    = "skald.hotkeyDisplay"
+        static let hotkey2KeyCode   = "skald.hotkey2KeyCode"
+        static let hotkey2Modifiers = "skald.hotkey2Modifiers"
+        static let hotkey2Display   = "skald.hotkey2Display"
     }
 
     private init() {}
@@ -320,6 +323,32 @@ final class Settings {
     var hotkeyDisplay: String {
         get { defaults.string(forKey: Key.hotkeyDisplay) ?? "/" }
         set { defaults.set(newValue, forKey: Key.hotkeyDisplay) }
+    }
+
+    /// Secondary "quick translate" hotkey. Triggers an in-place translation
+    /// of either the current selection (if any) or the clipboard contents.
+    /// Default ⌥` (option + backtick — keyCode 50 = the key under Esc).
+    var hotkey2KeyCode: Int {
+        get {
+            if let n = defaults.object(forKey: Key.hotkey2KeyCode) as? Int { return n }
+            return 50   // backtick
+        }
+        set { defaults.set(newValue, forKey: Key.hotkey2KeyCode) }
+    }
+
+    var hotkey2Modifiers: NSEvent.ModifierFlags {
+        get {
+            if let raw = defaults.object(forKey: Key.hotkey2Modifiers) as? UInt {
+                return NSEvent.ModifierFlags(rawValue: raw)
+            }
+            return [.option]
+        }
+        set { defaults.set(newValue.rawValue, forKey: Key.hotkey2Modifiers) }
+    }
+
+    var hotkey2Display: String {
+        get { defaults.string(forKey: Key.hotkey2Display) ?? "`" }
+        set { defaults.set(newValue, forKey: Key.hotkey2Display) }
     }
 
     func apiKey(for engine: Engine) -> String? {
