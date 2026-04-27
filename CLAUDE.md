@@ -84,18 +84,30 @@ Service name was bumped from `com.ivshestakov.skald` →
 `com.ivshestakov.skald.v2` to migrate cleanly: old strict-ACL entries
 become orphaned and the user re-enters keys once.
 
-## Status (2026-04-25)
+## Status (2026-04-27)
+
+**Currently published: 0.2.0** —
+<https://github.com/ivshestakov/skald.app/releases/tag/v0.2.0>
+
+Version history:
+- **0.2.0** (2026-04-27): added `⌥`` quick-translate hotkey
+  (selection-aware: replaces selection in place, or translates the
+  clipboard and pastes at cursor). Pasteboard helper extracted;
+  Settings → Shortcuts now has two recorder rows.
+- **0.1.0** (2026-04-25): first public release.
 
 ✅ Done for publication:
 - Renamed to Skald (bundle ID `com.ivshestakov.skald`)
 - Min macOS bumped to 15.0 (Apple translation requires it)
 - App icon `.icns` generated and embedded
 - Hammerspoon legacy deleted
-- LICENSE (MIT) + README.md + RELEASE.md
+- LICENSE (MIT) + README.md + INSTALL.md + RELEASE.md
 - .gitignore added
 - About Skald, Launch at Login, Check for Updates… in menu
 - Sparkle 2.9.1 framework embedded and code-signed correctly
 - Library-validation entitlement so Sparkle loads under hardened runtime
+- Two customisable hotkeys (panel + quick-translate)
+- Universal binary (arm64 + x86_64)
 
 ⏳ Pending — must be done before public release:
 
