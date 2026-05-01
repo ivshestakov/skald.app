@@ -10,10 +10,95 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var settingsWC: SettingsWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        installMainMenu()
         setupStatusBar()
         setupHotKey()
         promptAccessibilityIfNeeded()
         _ = Updater.shared        // boots Sparkle's background check
+    }
+
+    /// Skald is a menu-bar utility (LSUIElement = true) so the menu bar
+    /// shows nothing — but macOS still needs an `NSApp.mainMenu` for
+    /// keyboard-shortcut routing (⌘V / ⌘C / ⌘X / ⌘A) and for the system
+    /// to expose dictation on focused text fields. Without this the
+    /// input panel can't be pasted into and Whisper-style dictation
+    /// helpers fail to recognise the field as a regular text input.
+    private func installMainMenu() {
+        let mainMenu = NSMenu()
+
+        // App menu — first item, conventionally invisible-titled.
+        let appItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(
+            withTitle: "About Skald",
+            action: #selector(showAbout),
+            keyEquivalent: ""
+        ).target = self
+        appMenu.addItem(.separator())
+        appMenu.addItem(
+            withTitle: "Quit Skald",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        appItem.submenu = appMenu
+        mainMenu.addItem(appItem)
+
+        // Edit menu — the actual reason we're installing this. The
+        // selectors are forwarded down the responder chain to whatever
+        // text field is first responder, which gives us standard
+        // copy/paste/undo behaviour for free.
+        let editItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(
+            withTitle: "Undo",
+            action: Selector(("undo:")),
+            keyEquivalent: "z"
+        )
+        let redo = editMenu.addItem(
+            withTitle: "Redo",
+            action: Selector(("redo:")),
+            keyEquivalent: "z"
+        )
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(.separator())
+        editMenu.addItem(
+            withTitle: "Cut",
+            action: #selector(NSText.cut(_:)),
+            keyEquivalent: "x"
+        )
+        editMenu.addItem(
+            withTitle: "Copy",
+            action: #selector(NSText.copy(_:)),
+            keyEquivalent: "c"
+        )
+        editMenu.addItem(
+            withTitle: "Paste",
+            action: #selector(NSText.paste(_:)),
+            keyEquivalent: "v"
+        )
+        editMenu.addItem(
+            withTitle: "Select All",
+            action: #selector(NSText.selectAll(_:)),
+            keyEquivalent: "a"
+        )
+        editMenu.addItem(.separator())
+        // Adding this advertises the field as dictation-capable to the
+        // system. macOS ties Edit → Start Dictation… to the focused
+        // responder via `startDictation:`.
+        editMenu.addItem(
+            withTitle: "Start Dictation…",
+            action: Selector(("startDictation:")),
+            keyEquivalent: ""
+        )
+        editMenu.addItem(
+            withTitle: "Emoji & Symbols",
+            action: #selector(NSApplication.orderFrontCharacterPalette(_:)),
+            keyEquivalent: " "
+        )
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+
+        NSApp.mainMenu = mainMenu
     }
 
     // MARK: status bar

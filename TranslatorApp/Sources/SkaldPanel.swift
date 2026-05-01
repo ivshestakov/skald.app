@@ -191,6 +191,11 @@ final class SkaldPanel: NSObject {
         }
 
         panel.alphaValue = 0
+        // Bring Skald to the foreground so mainMenu shortcuts (⌘V, ⌘C,
+        // dictation) route to our text field. previousApp is preserved
+        // in `self.previousApp` and re-activated before paste / on
+        // dismissal.
+        NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(input)
 
@@ -203,13 +208,17 @@ final class SkaldPanel: NSObject {
         installClickMonitor()
     }
 
-    func dismiss() {
+    /// `restoreFocus` is false on click-outside dismissal — the click
+    /// itself activated whatever app it landed on, and re-activating
+    /// previousApp would steal focus back from there.
+    func dismiss(restoreFocus: Bool = true) {
         requestToken = nil             // invalidate any in-flight translate()
         spinner.stopAnimation(nil)
         tonePopover?.close()
         tonePopover = nil
         removeClickMonitor()
         panel?.orderOut(nil)
+        if restoreFocus { previousApp?.activate() }
     }
 
     // MARK: build
@@ -217,7 +226,7 @@ final class SkaldPanel: NSObject {
     private func build() {
         let p = FloatingPanel(
             contentRect: NSRect(x: 0, y: 0, width: cardWidth, height: cardHeight),
-            styleMask: [.borderless, .nonactivatingPanel],
+            styleMask: [.borderless],
             backing: .buffered,
             defer: false
         )
@@ -325,8 +334,25 @@ final class SkaldPanel: NSObject {
         off.action = #selector(toggleOfflineOverride)
         off.setContentHuggingPriority(.required, for: .horizontal)
 
+        // Settings gear at the far right — quick access without going
+        // through the menu bar.
+        let gear = NSButton()
+        gear.translatesAutoresizingMaskIntoConstraints = false
+        gear.isBordered = false
+        gear.bezelStyle = .regularSquare
+        gear.setButtonType(.momentaryChange)
+        gear.imagePosition = .imageOnly
+        gear.target = self
+        gear.action = #selector(openSettingsFromPanel)
+        let gearConfig = NSImage.SymbolConfiguration(pointSize: 14, weight: .semibold)
+        gear.image = NSImage(systemSymbolName: "gearshape", accessibilityDescription: "Settings")?
+            .withSymbolConfiguration(gearConfig)
+        gear.contentTintColor = NSColor(white: 1, alpha: 0.92)
+        gear.toolTip = "Open Settings"
+        gear.setContentHuggingPriority(.required, for: .horizontal)
+
         // Row that shows when we're accepting input.
-        let inputStack = NSStackView(views: [field, pill, off])
+        let inputStack = NSStackView(views: [field, pill, off, gear])
         inputStack.orientation = .horizontal
         inputStack.alignment = .centerY
         inputStack.spacing = 10
@@ -362,6 +388,8 @@ final class SkaldPanel: NSObject {
             pill.heightAnchor.constraint(equalToConstant: 28),
             off.widthAnchor.constraint(equalToConstant: 32),
             off.heightAnchor.constraint(equalToConstant: 28),
+            gear.widthAnchor.constraint(equalToConstant: 28),
+            gear.heightAnchor.constraint(equalToConstant: 28),
 
             loaderStack.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             loaderStack.centerYAnchor.constraint(equalTo: root.centerYAnchor),
@@ -445,6 +473,13 @@ final class SkaldPanel: NSObject {
 
     private func updateTonePill() {
         tonePill?.apply(tone: Settings.shared.tone, active: isToneActive())
+    }
+
+    @objc private func openSettingsFromPanel() {
+        // Dismiss the panel first so the Settings window can become key
+        // without fighting our floating panel for focus.
+        dismiss(restoreFocus: false)
+        (NSApp.delegate as? AppDelegate)?.openSettings()
     }
 
     @objc private func openStyleSettings() {
@@ -642,7 +677,9 @@ final class SkaldPanel: NSObject {
         clickMonitor = NSEvent.addGlobalMonitorForEvents(
             matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
         ) { [weak self] _ in
-            self?.dismiss()
+            // The click already activated whatever the user clicked into;
+            // don't re-steal focus back to previousApp.
+            self?.dismiss(restoreFocus: false)
         }
     }
 
