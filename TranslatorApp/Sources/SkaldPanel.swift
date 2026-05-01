@@ -176,6 +176,7 @@ final class SkaldPanel: NSObject {
         guard let panel, let input else { return }
 
         input.stringValue = ""
+        input.placeholderAttributedString = Self.placeholderString()
         setLoading(false)
         updateOfflineVisual()
         updateStyleAccent()
@@ -288,13 +289,9 @@ final class SkaldPanel: NSObject {
         field.isBezeled = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.placeholderAttributedString = NSAttributedString(
-            string: "translate…",
-            attributes: [
-                .foregroundColor: NSColor(white: 1, alpha: 0.72),
-                .font: NSFont.systemFont(ofSize: 20, weight: .medium),
-            ]
-        )
+        // Initial placeholder; refreshed on every show() so it tracks the
+        // currently configured language pair.
+        field.placeholderAttributedString = Self.placeholderString()
         field.font = NSFont.systemFont(ofSize: 20, weight: .medium)
         field.textColor = .white
         field.delegate = self
@@ -554,6 +551,22 @@ final class SkaldPanel: NSObject {
                 Self.showTranslateError(err)
             }
         }
+    }
+
+    /// Placeholder shown inside the empty input field — currently the
+    /// configured language pair so the user can confirm at a glance which
+    /// way Skald is about to translate (e.g. "RU  ↔  EN").
+    private static func placeholderString() -> NSAttributedString {
+        let primary   = Settings.shared.primaryLanguage.rawValue.uppercased()
+        let secondary = Settings.shared.secondaryLanguage.rawValue.uppercased()
+        return NSAttributedString(
+            string: "\(primary)  ↔  \(secondary)",
+            attributes: [
+                .foregroundColor: NSColor(white: 1, alpha: 0.55),
+                .font: NSFont.systemFont(ofSize: 20, weight: .medium),
+                .kern: 1.0,
+            ]
+        )
     }
 
     private static func showTranslateError(_ err: Error) {
