@@ -42,7 +42,7 @@ testing only). Must live in your login keychain.
    security find-identity -v -p codesigning | grep "Developer ID"
    ```
    Should print
-   `Developer ID Application: Ivan Shestakov (PSDN96Z689)`.
+   `Developer ID Application: Ivan Shestakov (975ZZPJQNB)`.
 
 ### 2. notarytool keychain profile
 
@@ -56,7 +56,7 @@ testing only). Must live in your login keychain.
    ```
    xcrun notarytool store-credentials skald-notarize \
      --apple-id ivshestakov@gmail.com \
-     --team-id PSDN96Z689 \
+     --team-id 975ZZPJQNB \
      --password <the-app-specific-password-from-step-1>
    ```
    This caches the credentials in the login keychain under a profile
@@ -122,7 +122,7 @@ Commit on `main`.
 From `TranslatorApp/`:
 
 ```bash
-SKALD_SIGN_IDENTITY="Developer ID Application: Ivan Shestakov (PSDN96Z689)" \
+SKALD_SIGN_IDENTITY="Developer ID Application: Ivan Shestakov (975ZZPJQNB)" \
   ./release.sh
 ```
 

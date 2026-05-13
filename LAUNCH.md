@@ -38,7 +38,7 @@ Development» — последний только для локального Xc
   ```
   security find-identity -v -p codesigning | grep "Developer ID"
   ```
-  Должно вывести `Developer ID Application: Ivan Shestakov (PSDN96Z689)`.
+  Должно вывести `Developer ID Application: Ivan Shestakov (975ZZPJQNB)`.
 
 ### 0.2. Notarization keychain profile
 
@@ -51,7 +51,7 @@ Development» — последний только для локального Xc
   ```
   xcrun notarytool store-credentials skald-notarize \
     --apple-id ivshestakov@gmail.com \
-    --team-id PSDN96Z689 \
+    --team-id 975ZZPJQNB \
     --password <app-specific-password>
   ```
   Это кэширует креды в keychain под профилем `skald-notarize`.
@@ -98,7 +98,7 @@ curl -fsSI https://panic-kit.com/skald/appcast.xml
   panic-kit.com).
 - ```
   cd TranslatorApp
-  SKALD_SIGN_IDENTITY="Developer ID Application: Ivan Shestakov (PSDN96Z689)" \
+  SKALD_SIGN_IDENTITY="Developer ID Application: Ivan Shestakov (975ZZPJQNB)" \
     ./release.sh
   ```
   Скрипт выплюнет `dist/Skald-0.3.0.dmg` и `<item>` блок для appcast'а.

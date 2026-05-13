@@ -4,14 +4,14 @@
 # <item> block for appcast.xml.
 #
 # Usage:
-#   SKALD_SIGN_IDENTITY="Developer ID Application: Ivan Shestakov (PSDN96Z689)" \
+#   SKALD_SIGN_IDENTITY="Developer ID Application: Ivan Shestakov (975ZZPJQNB)" \
 #     ./release.sh
 #
 # Requires (one-time setup, see RELEASE.md):
 #   • Developer ID Application cert installed in login keychain
 #   • notarytool keychain profile named `skald-notarize`
 #       xcrun notarytool store-credentials skald-notarize \
-#         --apple-id you@example.com --team-id PSDN96Z689 \
+#         --apple-id you@example.com --team-id 975ZZPJQNB \
 #         --password <app-specific-password>
 #   • Sparkle EdDSA keypair (already generated; private key in keychain)
 #
@@ -28,7 +28,7 @@ if [ -z "${SKALD_SIGN_IDENTITY:-}" ]; then
 SKALD_SIGN_IDENTITY not set. For release builds you must use a real
 Developer ID Application certificate, e.g.:
 
-  SKALD_SIGN_IDENTITY="Developer ID Application: Ivan Shestakov (PSDN96Z689)" \\
+  SKALD_SIGN_IDENTITY="Developer ID Application: Ivan Shestakov (975ZZPJQNB)" \\
     ./release.sh
 
 (Self-signed builds cannot be notarized.)
@@ -52,7 +52,7 @@ if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>
   echo "!! notarytool keychain profile '$NOTARY_PROFILE' not found." >&2
   echo "   Set it up once with:" >&2
   echo "     xcrun notarytool store-credentials $NOTARY_PROFILE \\" >&2
-  echo "       --apple-id you@example.com --team-id PSDN96Z689 \\" >&2
+  echo "       --apple-id you@example.com --team-id 975ZZPJQNB \\" >&2
   echo "       --password <app-specific-password from appleid.apple.com>" >&2
   exit 1
 fi
