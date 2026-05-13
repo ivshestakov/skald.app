@@ -19,7 +19,19 @@ if ! security find-identity -v -p codesigning | grep -q "$SIGN_IDENTITY"; then
   SIGN_IDENTITY="-"
 fi
 
-# Build a universal binary by default (arm64 + x86_64) so the same .zip
+# Developer ID Application certs must include a secure timestamp for
+# notarization to succeed (Apple's notary service refuses anything
+# signed `--timestamp=none`). Self-signed dev builds, on the other
+# hand, can't reach Apple's TSA reliably and don't need a timestamp.
+if [[ "$SIGN_IDENTITY" == Developer\ ID\ Application:* ]]; then
+  TIMESTAMP_FLAG="--timestamp"
+  echo "==> Signing for Developer ID distribution: $SIGN_IDENTITY"
+else
+  TIMESTAMP_FLAG="--timestamp=none"
+  echo "==> Signing for local dev: $SIGN_IDENTITY"
+fi
+
+# Build a universal binary by default (arm64 + x86_64) so the same .dmg
 # runs on both Apple Silicon and Intel Macs. Override with
 # `SKALD_BUILD_ARCH=native` to compile only for the host arch (faster
 # during dev).
@@ -83,20 +95,30 @@ else
 fi
 
 echo "==> Signing"
-# Sign embedded framework + nested helpers first, then the outer app.
-# Sparkle ships XPC services and an Updater helper that all need to be
-# signed individually for Gatekeeper to accept the bundle.
-codesign -s "$SIGN_IDENTITY" --force --options=runtime --timestamp=none \
-  "$BUNDLE/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Downloader.xpc" 2>/dev/null || true
-codesign -s "$SIGN_IDENTITY" --force --options=runtime --timestamp=none \
-  "$BUNDLE/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices/Installer.xpc" 2>/dev/null || true
-codesign -s "$SIGN_IDENTITY" --force --options=runtime --timestamp=none \
-  "$BUNDLE/Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app" 2>/dev/null || true
-codesign -s "$SIGN_IDENTITY" --force --options=runtime --timestamp=none \
-  "$BUNDLE/Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate" 2>/dev/null || true
-codesign -s "$SIGN_IDENTITY" --force --options=runtime --timestamp=none \
+# Re-sign Sparkle's pre-signed helpers with our identity, preserving
+# their original entitlements (each XPC service needs a distinct set —
+# Installer needs library-validation off, Downloader needs network).
+# `--preserve-metadata=identifier,entitlements,flags` keeps them intact.
+SPARKLE="$BUNDLE/Contents/Frameworks/Sparkle.framework/Versions/Current"
+
+codesign -s "$SIGN_IDENTITY" --force --options=runtime $TIMESTAMP_FLAG \
+  --preserve-metadata=identifier,entitlements,flags \
+  "$SPARKLE/XPCServices/Downloader.xpc"
+codesign -s "$SIGN_IDENTITY" --force --options=runtime $TIMESTAMP_FLAG \
+  --preserve-metadata=identifier,entitlements,flags \
+  "$SPARKLE/XPCServices/Installer.xpc" 2>/dev/null || true
+codesign -s "$SIGN_IDENTITY" --force --options=runtime $TIMESTAMP_FLAG \
+  --preserve-metadata=identifier,entitlements,flags \
+  "$SPARKLE/Updater.app"
+codesign -s "$SIGN_IDENTITY" --force --options=runtime $TIMESTAMP_FLAG \
+  --preserve-metadata=identifier,entitlements,flags \
+  "$SPARKLE/Autoupdate"
+codesign -s "$SIGN_IDENTITY" --force --options=runtime $TIMESTAMP_FLAG \
   "$BUNDLE/Contents/Frameworks/Sparkle.framework"
-codesign -s "$SIGN_IDENTITY" --force --deep --options=runtime \
+codesign -s "$SIGN_IDENTITY" --force --options=runtime $TIMESTAMP_FLAG \
   --entitlements Skald.entitlements "$BUNDLE" >/dev/null
+
+echo "==> Verifying signature"
+codesign --verify --strict --verbose=2 "$BUNDLE" 2>&1 | tail -5
 
 echo "==> Done: $(pwd)/$BUNDLE"

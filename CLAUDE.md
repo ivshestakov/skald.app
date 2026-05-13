@@ -19,14 +19,22 @@ the per-release procedure (notarize, sign, appcast).
 ## Code structure
 
 ```
+docs/                     — served via GitHub Pages (Settings → Pages → main /docs)
+├── appcast.xml           — Sparkle update feed (one <item> per release)
+└── index.html            — minimal lander linking to GitHub releases
+
 TranslatorApp/
 ├── Info.plist            — bundle metadata + Sparkle keys (SUFeedURL/SUPublicEDKey)
 ├── Skald.entitlements    — disables library-validation so Sparkle.framework loads
-├── build.sh              — swiftc + manual bundle, embeds Sparkle, signs with stable cert
+├── build.sh              — swiftc + manual bundle, embeds Sparkle, signs (dev or Dev ID)
+├── release.sh            — full release pipeline: build → notarize → DMG → notarize DMG → Sparkle sign
 ├── make-icon.sh          — sips/iconutil pipeline: PNG → multi-resolution .icns
 ├── icon-source.png       — 1024×1024 master icon
 ├── Resources/Skald.icns  — generated, copied into bundle
-├── Frameworks/Sparkle.framework  — embedded auto-update framework (3 MB)
+├── Frameworks/
+│   ├── Sparkle.framework — embedded auto-update framework (3 MB)
+│   └── Sparkle-bin/      — Sparkle CLI tools used by release.sh only
+│                           (generate_keys, sign_update, generate_appcast, BinaryDelta)
 └── Sources/
     ├── main.swift
     ├── AppDelegate.swift          — status-bar menu, hotkey registration, About panel,
@@ -84,57 +92,68 @@ Service name was bumped from `com.ivshestakov.skald` →
 `com.ivshestakov.skald.v2` to migrate cleanly: old strict-ACL entries
 become orphaned and the user re-enters keys once.
 
-## Status (2026-04-27)
+## Status (2026-05-13)
 
-**Currently published: 0.2.0** —
-<https://github.com/ivshestakov/skald.app/releases/tag/v0.2.0>
+**Currently published: 0.2.2** —
+<https://github.com/ivshestakov/skald.app/releases/tag/v0.2.2>
 
 Version history:
-- **0.2.0** (2026-04-27): added `⌥`` quick-translate hotkey
-  (selection-aware: replaces selection in place, or translates the
-  clipboard and pastes at cursor). Pasteboard helper extracted;
-  Settings → Shortcuts now has two recorder rows.
+- **0.3.0** (in flight): release infrastructure — `release.sh`
+  produces a signed + notarized DMG, Sparkle EdDSA keypair generated,
+  `docs/appcast.xml` skeleton on main, GitHub Pages set to serve `docs/`.
+- **0.2.2** (2026-05-13): paste, dictation, settings gear.
+- **0.2.1** (2026-05-05): hardened Claude prompt.
+- **0.2.0** (2026-04-27): `⌥`` quick-translate hotkey.
 - **0.1.0** (2026-04-25): first public release.
 
 ✅ Done for publication:
 - Renamed to Skald (bundle ID `com.ivshestakov.skald`)
-- Min macOS bumped to 15.0 (Apple translation requires it)
+- Min macOS 15.0
 - App icon `.icns` generated and embedded
-- Hammerspoon legacy deleted
 - LICENSE (MIT) + README.md + INSTALL.md + RELEASE.md
-- .gitignore added
 - About Skald, Launch at Login, Check for Updates… in menu
-- Sparkle 2.9.1 framework embedded and code-signed correctly
+- Sparkle 2.9.1 framework embedded; CLI tools at
+  `TranslatorApp/Frameworks/Sparkle-bin/` for release pipeline
 - Library-validation entitlement so Sparkle loads under hardened runtime
 - Two customisable hotkeys (panel + quick-translate)
 - Universal binary (arm64 + x86_64)
+- **Release pipeline** (`release.sh`): build → sign with Dev ID →
+  notarize → staple → DMG → sign DMG → notarize DMG → staple DMG →
+  Sparkle sign. Prints ready-to-paste `<item>` for appcast.
+- Sparkle EdDSA public key in Info.plist (`SUPublicEDKey`); private key
+  in login keychain under `https://sparkle-project.org`.
+- `docs/appcast.xml` skeleton + `docs/index.html` on `main`.
 
-⏳ Pending — must be done before public release:
+⏳ Pending — manual steps before first signed release:
 
-1. **Apple Developer ID** ($99/year). Until then users see a Gatekeeper
-   warning on first open and must right-click → Open. Set
-   `SKALD_SIGN_IDENTITY` and re-build/notarize per RELEASE.md.
+1. **Generate Developer ID Application cert** at developer.apple.com,
+   install in login keychain. Dev account is paid; only the cert is
+   missing (`security find-identity` shows only "Apple Development",
+   which is for Xcode/local builds).
 
-2. **Sparkle keys & feed URL.** Currently `SUFeedURL` is a placeholder
-   (`https://example.com/skald/appcast.xml`) and `SUPublicEDKey` is empty.
-   Before shipping:
-   - Generate EdDSA keys: `Frameworks/Sparkle.framework/Versions/Current/../../bin/generate_keys`
-   - Paste public key into `Info.plist` → `SUPublicEDKey`
-   - Set up GitHub Pages branch hosting `appcast.xml`
-   - Update `SUFeedURL` to the real Pages URL
+2. **App-specific password + notarytool profile.** Create at
+   appleid.apple.com, store via
+   `xcrun notarytool store-credentials skald-notarize`.
 
-3. **Bump version** in Info.plist before each release
-   (`CFBundleShortVersionString` and `CFBundleVersion`).
+3. **Enable GitHub Pages → main `/docs`** in repo settings.
 
-4. **GitHub repo + Pages** for hosting releases and appcast.
+4. **Back up the Sparkle private key** offline. Losing it strands
+   every existing install from future auto-updates.
+
+5. **Run `./release.sh`**, upload DMG to a GitHub Release, paste
+   `<item>` into `docs/appcast.xml`.
+
+See `RELEASE.md` for the per-release procedure and `LAUNCH.md`
+Phase 0 for the launch-day checklist.
 
 ## Decisions on file
 
 - License: MIT
-- Distribution: GitHub Releases (.zip), no App Store
+- Distribution: GitHub Releases (signed + notarized .dmg), no App Store
 - Localization: English only
 - Min macOS: 15.0 (Sequoia)
-- Auto-update: Sparkle (manual builds for now, formal first release later)
+- Auto-update: Sparkle 2.9.1, EdDSA-signed, appcast served from
+  GitHub Pages at `ivshestakov.github.io/skald.app/appcast.xml`
 
 ## Pre-release polish list (nice-to-have, not blocking)
 
