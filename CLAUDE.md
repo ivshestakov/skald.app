@@ -18,11 +18,21 @@ the per-release procedure (notarize, sign, appcast).
 
 ## Code structure
 
-```
-docs/                     — served via GitHub Pages (Settings → Pages → main /docs)
-├── appcast.xml           — Sparkle update feed (one <item> per release)
-└── index.html            — minimal lander linking to GitHub releases
+Product page + appcast feed live in a **separate repo**
+([ivshestakov/panic-kit](https://github.com/ivshestakov/panic-kit),
+deployed via Vercel to `panic-kit.com`):
 
+```
+panic-kit/skald/
+├── index.html            — product landing in parent-site style
+├── support.html          — install, accessibility, troubleshooting
+├── privacy.html          — what stays on device, what leaves it
+└── appcast.xml           — Sparkle update feed (one <item> per release)
+```
+
+Skald's own repo holds source + release tooling:
+
+```
 TranslatorApp/
 ├── Info.plist            — bundle metadata + Sparkle keys (SUFeedURL/SUPublicEDKey)
 ├── Skald.entitlements    — disables library-validation so Sparkle.framework loads
@@ -122,7 +132,9 @@ Version history:
   Sparkle sign. Prints ready-to-paste `<item>` for appcast.
 - Sparkle EdDSA public key in Info.plist (`SUPublicEDKey`); private key
   in login keychain under `https://sparkle-project.org`.
-- `docs/appcast.xml` skeleton + `docs/index.html` on `main`.
+- Product page + appcast hosted on `panic-kit.com/skald` (Vercel-served
+  from the [ivshestakov/panic-kit](https://github.com/ivshestakov/panic-kit)
+  repo at `/skald/`). `SUFeedURL` in Info.plist points there.
 
 ⏳ Pending — manual steps before first signed release:
 
@@ -135,13 +147,14 @@ Version history:
    appleid.apple.com, store via
    `xcrun notarytool store-credentials skald-notarize`.
 
-3. **Enable GitHub Pages → main `/docs`** in repo settings.
+3. **Push panic-kit/main** with the new `/skald/` page + appcast
+   skeleton (changes prepared locally, not yet pushed).
 
 4. **Back up the Sparkle private key** offline. Losing it strands
    every existing install from future auto-updates.
 
 5. **Run `./release.sh`**, upload DMG to a GitHub Release, paste
-   `<item>` into `docs/appcast.xml`.
+   `<item>` into panic-kit's `skald/appcast.xml`.
 
 See `RELEASE.md` for the per-release procedure and `LAUNCH.md`
 Phase 0 for the launch-day checklist.
@@ -153,7 +166,7 @@ Phase 0 for the launch-day checklist.
 - Localization: English only
 - Min macOS: 15.0 (Sequoia)
 - Auto-update: Sparkle 2.9.1, EdDSA-signed, appcast served from
-  GitHub Pages at `ivshestakov.github.io/skald.app/appcast.xml`
+  `panic-kit.com/skald/appcast.xml` (Vercel; source in panic-kit repo)
 
 ## Pre-release polish list (nice-to-have, not blocking)
 

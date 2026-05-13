@@ -36,7 +36,10 @@
     <!--
       Sparkle auto-updates.
 
-      • SUFeedURL    : HTTPS URL of the appcast.xml served from gh-pages.
+      • SUFeedURL    : HTTPS URL of the appcast.xml. Hosted alongside the
+                      product page on panic-kit.com (Vercel) — the
+                      appcast.xml file lives in the panic-kit GitHub
+                      repo at /skald/appcast.xml.
       • SUPublicEDKey: Base64 EdDSA public key. The matching private key
                       lives in the login keychain under
                       `https://sparkle-project.org`. Back it up with
@@ -45,7 +48,7 @@
                       installs can no longer verify updates.
     -->
     <key>SUFeedURL</key>
-    <string>https://ivshestakov.github.io/skald.app/appcast.xml</string>
+    <string>https://panic-kit.com/skald/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>jxJctZXd7IIRthQEe2DyTHYZvNZ4gVv0/kbh4C94pgo=</string>
     <key>SUEnableAutomaticChecks</key>

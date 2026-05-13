@@ -2,7 +2,12 @@
 
 Skald ships as a signed + notarized **DMG** hosted on GitHub Releases.
 Existing installs auto-update through Sparkle reading
-`https://ivshestakov.github.io/skald.app/appcast.xml`.
+`https://panic-kit.com/skald/appcast.xml`.
+
+The product page (`panic-kit.com/skald`) and the appcast feed both
+live in the **panic-kit** repo (https://github.com/ivshestakov/panic-kit),
+served via Vercel. Skald's own repo (this one) only holds the source +
+release tooling — appcast updates land in panic-kit on every release.
 
 This file covers both **one-time setup** (do once, ever) and the
 **per-release procedure** (do for every new version).
@@ -77,19 +82,19 @@ etc.). Losing it means existing installs can no longer verify any
 future update — you'd have to ship a new public key in `Info.plist`
 and every 0.3+ user would be stranded on their current version forever.
 
-### 4. GitHub Pages
+### 4. panic-kit hosting (nothing to do — already set up)
 
-The first time you push `docs/appcast.xml` to `main`, enable Pages:
+`panic-kit.com` is already deployed via Vercel from the
+[ivshestakov/panic-kit](https://github.com/ivshestakov/panic-kit) repo.
+Skald's product page lives there at `/skald/` and the appcast feed
+at `/skald/appcast.xml`.
 
-1. <https://github.com/ivshestakov/skald.app/settings/pages>
-2. **Source**: Deploy from a branch
-3. **Branch**: `main` / `/docs`
-4. Save. GitHub Pages provisions
-   `https://ivshestakov.github.io/skald.app/` within 1–2 minutes.
+To make a release, you'll edit `skald/appcast.xml` in that repo —
+either via the GitHub UI or by cloning it locally alongside this one.
 
 Verify the appcast is reachable:
 ```
-curl -fsSI https://ivshestakov.github.io/skald.app/appcast.xml
+curl -fsSI https://panic-kit.com/skald/appcast.xml
 ```
 Should return `HTTP/2 200`.
 
@@ -144,23 +149,31 @@ gh release create v0.3.1 TranslatorApp/dist/Skald-0.3.1.dmg \
   --notes-file <(printf '## What's new\n\n- thing 1\n- thing 2\n')
 ```
 
-### 4. Update appcast.xml
+### 4. Update appcast.xml (in the panic-kit repo)
 
-Paste the `<item>` block that `release.sh` printed into
-`docs/appcast.xml` at the **top** of `<channel>`, above any older
-items. Fill in the release notes in the `<description><![CDATA[ … ]]></description>`
-block (HTML allowed — Sparkle renders it in the update prompt).
+Paste the `<item>` block that `release.sh` printed into the panic-kit
+repo at `skald/appcast.xml`, just below the comment inside `<channel>`
+(newest item first). Fill in the release notes in the
+`<description><![CDATA[ … ]]></description>` block (HTML allowed —
+Sparkle renders it in the update prompt).
 
-Commit + push:
+Two ways to do it:
 
+**A. Via GitHub UI** (one-off, no clone needed):
+<https://github.com/ivshestakov/panic-kit/edit/main/skald/appcast.xml>
+
+**B. Local clone** (cleaner if you do this often):
 ```bash
-git add docs/appcast.xml
-git commit -m "Appcast: 0.3.1"
+gh repo clone ivshestakov/panic-kit ~/code/panic-kit
+cd ~/code/panic-kit
+# edit skald/appcast.xml
+git add skald/appcast.xml
+git commit -m "skald: appcast 0.3.1"
 git push
 ```
 
-Pages re-deploys within ~30 seconds. Existing installs poll the
-appcast every 24h (configurable via `SUScheduledCheckInterval` in
+Vercel redeploys panic-kit within ~30 seconds. Existing installs poll
+the appcast every 24h (configurable via `SUScheduledCheckInterval` in
 Info.plist) and on next launch.
 
 ### 5. Sanity-check the update flow

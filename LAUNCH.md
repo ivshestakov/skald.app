@@ -68,47 +68,47 @@ Development» — последний только для локального Xc
   Положить в 1Password / на флешку. Потерять — навсегда отрезать
   существующих юзеров от автообновлений.
 
-### 0.4. GitHub Pages — включить раздачу `docs/`
+### 0.4. panic-kit лендинг — ✅ сделано
 
-`docs/appcast.xml` и `docs/index.html` уже лежат в репо на main.
-Pages нужно включить один раз через UI:
+`panic-kit.com/skald` уже есть (продуктовая страница в стиле parent-сайта)
+и `panic-kit.com/skald/appcast.xml` — это Sparkle feed. Всё в репо
+[ivshestakov/panic-kit](https://github.com/ivshestakov/panic-kit), раздаётся
+через Vercel автоматически на каждый push в main.
 
-- <https://github.com/ivshestakov/skald.app/settings/pages>
-- **Source:** Deploy from a branch
-- **Branch:** `main` / `/docs`
-- **Save**. Через ~1 минуту работает `https://ivshestakov.github.io/skald.app/`.
-- Проверить:
-  ```
-  curl -fsSI https://ivshestakov.github.io/skald.app/appcast.xml
-  ```
-  Должен вернуть `HTTP/2 200`.
+`SUFeedURL` в Info.plist уже указывает на новый URL.
 
-### 0.5. Домен skald.app *(опционально)*
+Проверить после push'а panic-kit:
+```
+curl -fsSI https://panic-kit.com/skald/appcast.xml
+```
+Должен вернуть `HTTP/2 200`.
 
-Усиливает «легитимность» при лонче, но не блокер.
+### 0.5. Домен skald.app *(опционально, в будущем)*
 
-- Купить на Porkbun (~$15/год для `.app`) или Cloudflare Registrar
-- Настроить DNS: CNAME на `ivshestakov.github.io`, custom domain в
-  GitHub Pages settings. Закоммитить `docs/CNAME` с одной строкой `skald.app`.
-- Появится `https://skald.app` — лендинг = `docs/index.html`,
-  appcast перенаправится автоматически.
-- Если домен покупаешь — потом не забыть обновить `SUFeedURL` в
-  Info.plist (`skald.app/appcast.xml`) и оставить redirect со старого
-  github.io URL для существующих 0.3.x юзеров.
+Если захочется отдельный бренд `skald.app` (например для маркетинга),
+докинуть как alias на Vercel-проект panic-kit — Vercel поддерживает
+несколько доменов на один деплой. Тогда `skald.app` будет
+проксировать на текущий `/skald/` контент. Не блокер для лонча.
 
 ### 0.6. Релиз 0.3.0 — первая чистая сборка
 
-Когда 0.1, 0.2, 0.4 сделаны (0.3 и инфра уже готовы):
+Когда 0.1, 0.2, и panic-kit запушен в main:
 
-- Версия `0.3.0` и build `5` уже в Info.plist.
-- `SKALD_SIGN_IDENTITY="Developer ID Application: Ivan Shestakov (PSDN96Z689)" \
-    ./release.sh` из `TranslatorApp/`.
-- Скрипт выплюнет `dist/Skald-0.3.0.dmg` и `<item>` блок для appcast'а.
-- `gh release create v0.3.0 TranslatorApp/dist/Skald-0.3.0.dmg \
-    --title "Skald 0.3.0" --notes "..."`
-- Вставить `<item>` в `docs/appcast.xml` (сразу после `<language>en</language>`,
-  выше всех остальных items если они есть).
-- `git add docs/appcast.xml && git commit -m "Appcast: 0.3.0" && git push`
+- Версия `0.3.0` и build `5` уже в Info.plist (SUFeedURL уже на
+  panic-kit.com).
+- ```
+  cd TranslatorApp
+  SKALD_SIGN_IDENTITY="Developer ID Application: Ivan Shestakov (PSDN96Z689)" \
+    ./release.sh
+  ```
+  Скрипт выплюнет `dist/Skald-0.3.0.dmg` и `<item>` блок для appcast'а.
+- ```
+  gh release create v0.3.0 TranslatorApp/dist/Skald-0.3.0.dmg \
+    --title "Skald 0.3.0" --notes "..."
+  ```
+- Вставить `<item>` в `skald/appcast.xml` **в репо panic-kit** (через
+  UI: github.com/ivshestakov/panic-kit/edit/main/skald/appcast.xml — или
+  клонировать локально). Закоммитить + push, Vercel задеплоит за ~30с.
 - Описание в release notes: «**No more Gatekeeper warnings** — Skald is now
   signed and notarized. Auto-updates enabled — future versions install
   themselves.»
@@ -355,7 +355,8 @@ indie проектов.** Не надо насиловать монетизац�
       automatic checks включены
 - [x] `release.sh` собирает signed + notarized DMG, печатает готовый
       `<item>` для appcast'а
-- [x] `docs/appcast.xml` skeleton + `docs/index.html` лендинг на main
+- [x] Продуктовая страница `panic-kit.com/skald` + `appcast.xml` в
+      panic-kit репо, SUFeedURL указывает туда
 - [x] Self-signed работает для dev (TCC grants держатся)
 - [x] Tone slider, оффлайн-фоллбек, два хоткея, dictation, gear icon
 
@@ -365,7 +366,9 @@ indie проектов.** Не надо насиловать монетизац�
    ~5 минут в браузере + Keychain Access.
 2. **Создать app-specific password + notarytool profile** (раздел 0.2) —
    ~3 минуты.
-3. **Включить GitHub Pages → docs/** (раздел 0.4) — клик в Settings.
+3. **Push panic-kit/main** (страница `/skald/` + `/skald/appcast.xml`
+   ждут пуша в [ivshestakov/panic-kit](https://github.com/ivshestakov/panic-kit)).
 4. **Забэкапить Sparkle private key** (раздел 0.3) — одна команда.
 5. **Запустить `./release.sh`** — производит signed/notarized DMG.
-6. **`gh release create v0.3.0`** + вставить `<item>` в `docs/appcast.xml`.
+6. **`gh release create v0.3.0`** + вставить `<item>` в
+   `skald/appcast.xml` репо panic-kit.

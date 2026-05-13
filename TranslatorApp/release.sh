@@ -153,8 +153,9 @@ Next steps:
        --title "Skald ${VERSION}" \\
        --notes "Release notes here (markdown)"
 
-2. Add this <item> to appcast.xml on the gh-pages branch
-   (newest item first):
+2. Open the panic-kit repo (https://github.com/ivshestakov/panic-kit)
+   and add this <item> to /skald/appcast.xml just below the comment
+   inside <channel> (newest item first):
 
   <item>
     <title>Skald ${VERSION}</title>
@@ -176,8 +177,10 @@ Next steps:
       ${SPARKLE_LINE} />
   </item>
 
-3. Commit + push appcast.xml on gh-pages. Existing 0.2.x installs
-   need to be upgraded manually first (they don't have a working
-   appcast yet); from 0.3.0 onwards updates roll out automatically.
+3. Commit + push to panic-kit/main. Vercel redeploys automatically
+   within ~30s. Existing 0.3+ installs poll panic-kit.com/skald/appcast.xml
+   every 24h and on relaunch — they pick up the new version from there.
+   (0.2.x users have to upgrade once manually; their Sparkle config
+    didn't have a working appcast yet.)
 
 EOF
