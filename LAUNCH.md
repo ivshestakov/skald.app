@@ -19,101 +19,105 @@ Cloud (платный proxy к Claude без BYOK) если будет спро�
 Цель: убрать все технические трения перед лончем. Без этого нет смысла
 куда-то постить — конверсия будет нулевая.
 
-### 0.1. Apple Developer ID — $99/год
+### 0.1. Apple Developer ID — $99/год  *(оплачен, нужен только cert)*
 
-Без этого никакая монетизация не имеет смысла, потому что Gatekeeper
-warning при первом запуске отпугивает 70%+ людей.
+Сам аккаунт уже есть. Осталось сгенерировать сертификат
+**Developer ID Application** (это НЕ то же самое, что «Apple
+Development» — последний только для локального Xcode).
 
-- Зарегистрироваться: <https://developer.apple.com/programs/enroll/>
-- Заплатить $99, ждать 24–48 часов на одобрение Apple
-- В личном кабинете → Certificates → создать **Developer ID Application**
-  certificate, скачать, установить в login keychain (двойным кликом
-  на `.cer` файл)
-- Проверить: `security find-identity -v -p codesigning` должен
-  показать `Developer ID Application: Ivan Shestakov (XXXXXXXXXX)`
+- <https://developer.apple.com/account/resources/certificates/list>
+  → **+** → **Developer ID Application** → Continue.
+- Apple просит CSR (Certificate Signing Request):
+  - **Keychain Access** → меню **Certificate Assistant** →
+    **Request a Certificate from a Certificate Authority…**
+  - Email: ivshestakov@gmail.com, Common Name: `Ivan Shestakov`,
+    Request is: **Saved to disk**.
+- Загрузить CSR назад на сайт Apple → скачать `developerID_application.cer`
+  → дабл-кликом установить в login keychain.
+- Проверить:
+  ```
+  security find-identity -v -p codesigning | grep "Developer ID"
+  ```
+  Должно вывести `Developer ID Application: Ivan Shestakov (975ZZPJQNB)`.
 
-### 0.2. Notarization
+### 0.2. Notarization keychain profile
 
-После того, как cert установлен, нужно настроить notarization, чтобы
-Apple подтверждала каждую сборку как «безопасную».
+Нужен **app-specific password** (не основной пароль Apple ID).
 
-- Сгенерировать **app-specific password** для notarization:
-  <https://appleid.apple.com/account/manage> → App-Specific Passwords →
-  Generate. Назвать `skald-notarize`. Сохранить в keychain под этим именем.
-- В терминале залогинить notarytool:
+- <https://appleid.apple.com/account/manage> → **App-Specific Passwords**
+  → **+** → имя `skald-notarize` → Generate. Пароль показывают **один раз** —
+  скопировать.
+- В терминале:
   ```
   xcrun notarytool store-credentials skald-notarize \
-    --apple-id you@example.com \
-    --team-id XXXXXXXXXX \
+    --apple-id ivshestakov@gmail.com \
+    --team-id 975ZZPJQNB \
     --password <app-specific-password>
   ```
-- Обновить `TranslatorApp/release.sh`: после `ditto` добавить
-  ```
-  xcrun notarytool submit "$DIST_DIR/$ZIP_NAME" \
-    --keychain-profile skald-notarize \
-    --wait
+  Это кэширует креды в keychain под профилем `skald-notarize`.
+  `release.sh` сам ищет этот профиль.
 
-  # Re-zip with stapled ticket
-  ditto -x -k "$DIST_DIR/$ZIP_NAME" /tmp/skald-staple/
-  xcrun stapler staple /tmp/skald-staple/Skald.app
-  rm "$DIST_DIR/$ZIP_NAME"
-  ditto -c -k --keepParent /tmp/skald-staple/Skald.app "$DIST_DIR/$ZIP_NAME"
-  rm -rf /tmp/skald-staple
-  ```
-- Билд теперь требует:
-  ```
-  SKALD_SIGN_IDENTITY="Developer ID Application: Ivan Shestakov (XXXXXXXXXX)" ./release.sh
-  ```
+### 0.3. Sparkle EdDSA-ключи — ✅ сделано
 
-### 0.3. Sparkle EdDSA-ключи и appcast
-
-Сейчас `SUFeedURL` указывает на `https://ivshestakov.github.io/skald.app/appcast.xml`,
-но appcast'а там нет, и `SUPublicEDKey` пустой. Auto-update не работает.
-
-- Сгенерировать ключи:
+- Public key уже в `Info.plist`: `jxJctZXd7IIRthQEe2DyTHYZvNZ4gVv0/kbh4C94pgo=`
+- Private key в login keychain под `https://sparkle-project.org`.
+- **Забэкапить приватный ключ:**
   ```
+  TranslatorApp/Frameworks/Sparkle-bin/generate_keys -x ~/skald-sparkle-private.key
+  ```
+  Положить в 1Password / на флешку. Потерять — навсегда отрезать
+  существующих юзеров от автообновлений.
+
+### 0.4. panic-kit лендинг — ✅ сделано
+
+`panic-kit.com/skald` уже есть (продуктовая страница в стиле parent-сайта)
+и `panic-kit.com/skald/appcast.xml` — это Sparkle feed. Всё в репо
+[ivshestakov/panic-kit](https://github.com/ivshestakov/panic-kit), раздаётся
+через Vercel автоматически на каждый push в main.
+
+`SUFeedURL` в Info.plist уже указывает на новый URL.
+
+Проверить после push'а panic-kit:
+```
+curl -fsSI https://panic-kit.com/skald/appcast.xml
+```
+Должен вернуть `HTTP/2 200`.
+
+### 0.5. Домен skald.app *(опционально, в будущем)*
+
+Если захочется отдельный бренд `skald.app` (например для маркетинга),
+докинуть как alias на Vercel-проект panic-kit — Vercel поддерживает
+несколько доменов на один деплой. Тогда `skald.app` будет
+проксировать на текущий `/skald/` контент. Не блокер для лонча.
+
+### 0.6. Релиз 0.3.0 — первая чистая сборка
+
+Когда 0.1, 0.2, и panic-kit запушен в main:
+
+- Версия `0.3.0` и build `5` уже в Info.plist (SUFeedURL уже на
+  panic-kit.com).
+- ```
   cd TranslatorApp
-  ./Frameworks/Sparkle.framework/Versions/Current/Resources/../../../bin/generate_keys
+  SKALD_SIGN_IDENTITY="Developer ID Application: Ivan Shestakov (975ZZPJQNB)" \
+    ./release.sh
   ```
-- Public key вставить в `Info.plist` → `SUPublicEDKey`. Private key —
-  система сохранила в keychain под `https://sparkle-project.org`.
-- Включить автопроверки: `SUEnableAutomaticChecks` → `true`.
-- Создать `gh-pages` ветку (или папку `docs/` на main + Pages из docs):
+  Скрипт выплюнет `dist/Skald-0.3.0.dmg` и `<item>` блок для appcast'а.
+- ```
+  gh release create v0.3.0 TranslatorApp/dist/Skald-0.3.0.dmg \
+    --title "Skald 0.3.0" --notes "..."
   ```
-  git checkout --orphan gh-pages
-  git rm -rf .
-  echo "Skald appcast" > index.html
-  git add index.html
-  git commit -m "Initial gh-pages"
-  git push -u origin gh-pages
-  ```
-- Настроить GitHub Pages: Settings → Pages → Source = `gh-pages`,
-  branch root.
-- Дальше для каждого релиза `bin/sign_update Skald-0.X.Y.zip` даёт
-  подпись, которая идёт в `<enclosure>` элемент в `appcast.xml`.
-  Подробности в `RELEASE.md`.
+- Вставить `<item>` в `skald/appcast.xml` **в репо panic-kit** (через
+  UI: github.com/ivshestakov/panic-kit/edit/main/skald/appcast.xml — или
+  клонировать локально). Закоммитить + push, Vercel задеплоит за ~30с.
+- Описание в release notes: «**No more Gatekeeper warnings** — Skald is now
+  signed and notarized. Auto-updates enabled — future versions install
+  themselves.»
 
-### 0.4. Домен skald.app
-
-Опционально, но усиливает «легитимность» при лонче.
-
-- Купить на Porkbun (~$15/год для `.app`) или Cloudflare Registrar
-- Настроить DNS: CNAME на `ivshestakov.github.io`, custom domain в
-  GitHub Pages settings
-- Появится `https://skald.app` — лендинг = README, релизы тут же
-
-### 0.5. Релиз 0.3.0 — первая чистая сборка
-
-Когда 0.1–0.4 сделаны:
-- Поднять версию до `0.3.0` в `Info.plist`
-- `SKALD_SIGN_IDENTITY="Developer ID Application: …" ./release.sh`
-- Залить .zip как GitHub Release `v0.3.0`
-- Сгенерить appcast item, закоммитить в gh-pages
-- Описание в release: «**No more Gatekeeper warnings** — Skald is now
-  signed and notarized. Auto-updates enabled.»
-
-**Критерий выхода из Phase 0:** друг скачивает .zip с GitHub, дабл-кликает
-`Skald.app` — открывается без правого клика и без warning'а.
+**Критерий выхода из Phase 0:** друг скачивает DMG с GitHub, открывает,
+тащит Skald.app в Applications, дабл-кликает — открывается без правого
+клика и без warning'а. И: на твоём 0.3.0 install в меню «Check for
+Updates…» работает (надо сначала кому-то поставить 0.3.0, чтобы было
+с чего тестировать обновление до 0.3.1).
 
 ---
 
@@ -344,14 +348,27 @@ indie проектов.** Не надо насиловать монетизац�
 
 ## Что есть прямо сейчас
 
-- [x] App работает (0.2.2)
+- [x] App работает (0.3.0, версия поднята, ещё не зарелизена)
 - [x] GitHub repo public, README + INSTALL + LICENSE + RELEASE.md
 - [x] Universal binary (arm64 + x86_64)
-- [x] Sparkle framework встроен (но appcast/keys не настроены)
-- [x] Self-signed signed (юзеры видят Gatekeeper warning)
+- [x] Sparkle EdDSA-ключи сгенерены, public key в Info.plist,
+      automatic checks включены
+- [x] `release.sh` собирает signed + notarized DMG, печатает готовый
+      `<item>` для appcast'а
+- [x] Продуктовая страница `panic-kit.com/skald` + `appcast.xml` в
+      panic-kit репо, SUFeedURL указывает туда
+- [x] Self-signed работает для dev (TCC grants держатся)
 - [x] Tone slider, оффлайн-фоллбек, два хоткея, dictation, gear icon
 
-## Что делаем следующим
+## Что осталось перед первым публичным релизом
 
-Открыть `LAUNCH.md` в свежем чате с Claude и сказать «делаем Phase 0,
-шаг 0.1 — Apple Developer ID». Дальше по плану.
+1. **Сгенерировать Developer ID Application cert** (раздел 0.1) —
+   ~5 минут в браузере + Keychain Access.
+2. **Создать app-specific password + notarytool profile** (раздел 0.2) —
+   ~3 минуты.
+3. **Push panic-kit/main** (страница `/skald/` + `/skald/appcast.xml`
+   ждут пуша в [ivshestakov/panic-kit](https://github.com/ivshestakov/panic-kit)).
+4. **Забэкапить Sparkle private key** (раздел 0.3) — одна команда.
+5. **Запустить `./release.sh`** — производит signed/notarized DMG.
+6. **`gh release create v0.3.0`** + вставить `<item>` в
+   `skald/appcast.xml` репо panic-kit.

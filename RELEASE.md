@@ -1,131 +1,208 @@
 # Releasing Skald
 
-This document covers what's needed to publish a new version of Skald —
-producing a downloadable build, hosting an appcast for Sparkle, and
-shipping the update to existing users.
+Skald ships as a signed + notarized **DMG** hosted on GitHub Releases.
+Existing installs auto-update through Sparkle reading
+`https://panic-kit.com/skald/appcast.xml`.
+
+The product page (`panic-kit.com/skald`) and the appcast feed both
+live in the **panic-kit** repo (https://github.com/ivshestakov/panic-kit),
+served via Vercel. Skald's own repo (this one) only holds the source +
+release tooling — appcast updates land in panic-kit on every release.
+
+This file covers both **one-time setup** (do once, ever) and the
+**per-release procedure** (do for every new version).
+
+---
 
 ## One-time setup
 
-### 1. Generate Sparkle update-signing keys
+You only need to do this section once. After it's done, the per-release
+steps below are a single `./release.sh` invocation plus a copy-paste.
 
-```bash
-cd TranslatorApp
-./Frameworks/Sparkle.framework/Versions/Current/Resources/../../../bin/generate_keys
+### 1. Apple Developer ID Application certificate
+
+The cert that signs the app for distribution outside the App Store.
+Different from the "Apple Development" cert (which is for Xcode/local
+testing only). Must live in your login keychain.
+
+1. <https://developer.apple.com/account/resources/certificates/list>
+   → **+** → "Developer ID Application" → Continue.
+2. Apple asks for a **CSR** (Certificate Signing Request):
+   - Open **Keychain Access** → menu **Certificate Assistant** →
+     **Request a Certificate from a Certificate Authority…**
+   - Email: your Apple-ID email
+   - Common Name: `Ivan Shestakov`
+   - Request is: **Saved to disk**
+   - Continue → saves `CertificateSigningRequest.certSigningRequest`.
+3. Upload the CSR file back on the Apple developer page. Apple returns
+   `developerID_application.cer`.
+4. Double-click the `.cer` to install it in the login keychain.
+5. Verify:
+   ```
+   security find-identity -v -p codesigning | grep "Developer ID"
+   ```
+   Should print
+   `Developer ID Application: Ivan Shestakov (975ZZPJQNB)`.
+
+### 2. notarytool keychain profile
+
+`notarytool` submits builds to Apple's notary service. It needs an
+**app-specific password** (not your regular Apple ID password).
+
+1. <https://appleid.apple.com/account/manage> → **App-Specific Passwords**
+   → **+** → name it `skald-notarize` → Generate.
+   Apple shows the password **once**. Copy it.
+2. In Terminal:
+   ```
+   xcrun notarytool store-credentials skald-notarize \
+     --apple-id ivshestakov@gmail.com \
+     --team-id 975ZZPJQNB \
+     --password <the-app-specific-password-from-step-1>
+   ```
+   This caches the credentials in the login keychain under a profile
+   named `skald-notarize`. `release.sh` looks for that exact name.
+3. Verify:
+   ```
+   xcrun notarytool history --keychain-profile skald-notarize
+   ```
+   Should not error (history may be empty — that's fine).
+
+### 3. Sparkle EdDSA keypair
+
+Already generated when this doc was written. Public key is in
+`TranslatorApp/Info.plist` under `SUPublicEDKey`. Private key lives in
+the login keychain under the account `https://sparkle-project.org`.
+
+**Back up the private key immediately**:
 ```
+TranslatorApp/Frameworks/Sparkle-bin/generate_keys -x ~/skald-sparkle-private.key
+```
+Store that file somewhere safe and offline (1Password, encrypted USB,
+etc.). Losing it means existing installs can no longer verify any
+future update — you'd have to ship a new public key in `Info.plist`
+and every 0.3+ user would be stranded on their current version forever.
 
-This prints a base64 EdDSA public key and writes the matching private key
-into your login keychain. **Save the public key into Info.plist's
-`SUPublicEDKey` value.** The private key never leaves your machine —
-losing it means you have to re-distribute a fresh public key (and any
-old client install can't verify your future updates).
+### 4. panic-kit hosting (nothing to do — already set up)
 
-### 2. Pick where to host the appcast
+`panic-kit.com` is already deployed via Vercel from the
+[ivshestakov/panic-kit](https://github.com/ivshestakov/panic-kit) repo.
+Skald's product page lives there at `/skald/` and the appcast feed
+at `/skald/appcast.xml`.
 
-Skald assumes `SUFeedURL` is reachable over HTTPS. The simplest path is
-GitHub Pages on your `skald` repo:
+To make a release, you'll edit `skald/appcast.xml` in that repo —
+either via the GitHub UI or by cloning it locally alongside this one.
 
-1. Create a `gh-pages` branch (or set Pages to serve from `/docs`).
-2. Pages URL becomes `https://<user>.github.io/skald/`.
-3. Set `SUFeedURL` in `Info.plist` to
-   `https://<user>.github.io/skald/appcast.xml`.
+Verify the appcast is reachable:
+```
+curl -fsSI https://panic-kit.com/skald/appcast.xml
+```
+Should return `HTTP/2 200`.
 
-### 3. Get an Apple Developer ID (for non-scary distribution)
+---
 
-Without a Developer ID, users see a Gatekeeper warning the first time
-they open the app. To eliminate that:
+## Per-release procedure
 
-1. Enrol at <https://developer.apple.com/programs/> ($99/year).
-2. Download the "Developer ID Application" certificate into the keychain.
-3. `security find-identity -v -p codesigning` — confirm the identity
-   shows up.
-4. Use it via env var:
-   `SKALD_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./build.sh`
-5. Notarise the build (see §"Per-release", below).
+For every new version (e.g. 0.3.0 → 0.3.1):
 
-## Per-release
-
-### 1. Bump version
+### 1. Bump the version
 
 In `TranslatorApp/Info.plist`:
 
 ```xml
 <key>CFBundleShortVersionString</key>
-<string>0.2.0</string>     <!-- semantic version -->
+<string>0.3.1</string>       <!-- semantic version users see -->
 <key>CFBundleVersion</key>
-<string>2</string>          <!-- monotonic build number -->
+<string>6</string>            <!-- monotonic build number (must increase) -->
 ```
 
-### 2. Build & sign
+Commit on `main`.
+
+### 2. Build, sign, notarize, package
+
+From `TranslatorApp/`:
 
 ```bash
-cd TranslatorApp
-SKALD_SIGN_IDENTITY="Developer ID Application: Your Name (TEAMID)" ./build.sh
+SKALD_SIGN_IDENTITY="Developer ID Application: Ivan Shestakov (975ZZPJQNB)" \
+  ./release.sh
 ```
 
-### 3. Notarise
+This script does the whole pipeline:
+
+1. Compiles a universal binary (arm64 + x86_64).
+2. Signs the app with Developer ID + hardened runtime + secure timestamp.
+3. Zips the app, submits to Apple notary (`--wait`, ~2 min), staples
+   the ticket into the .app.
+4. Builds `dist/Skald-<version>.dmg` (HFS+, UDZO compression, contains
+   `Skald.app` + `/Applications` symlink).
+5. Signs the DMG, submits it to notary, staples the DMG.
+6. Runs Sparkle's `sign_update` to produce the EdDSA signature line.
+7. Prints a ready-to-paste `<item>` block for `appcast.xml`.
+
+End state: `TranslatorApp/dist/Skald-0.3.1.dmg` exists, is notarized,
+stapled, and Sparkle-signed.
+
+### 3. Publish a GitHub Release
 
 ```bash
-ditto -c -k --keepParent Skald.app Skald.zip
-
-xcrun notarytool submit Skald.zip \
-  --apple-id you@example.com \
-  --team-id TEAMID \
-  --password APP_SPECIFIC_PASSWORD \
-  --wait
-
-xcrun stapler staple Skald.app
+gh release create v0.3.1 TranslatorApp/dist/Skald-0.3.1.dmg \
+  --title "Skald 0.3.1" \
+  --notes-file <(printf '## What's new\n\n- thing 1\n- thing 2\n')
 ```
 
-Re-zip after stapling so the staple ticket is bundled with the download.
+### 4. Update appcast.xml (in the panic-kit repo)
 
+Paste the `<item>` block that `release.sh` printed into the panic-kit
+repo at `skald/appcast.xml`, just below the comment inside `<channel>`
+(newest item first). Fill in the release notes in the
+`<description><![CDATA[ … ]]></description>` block (HTML allowed —
+Sparkle renders it in the update prompt).
+
+Two ways to do it:
+
+**A. Via GitHub UI** (one-off, no clone needed):
+<https://github.com/ivshestakov/panic-kit/edit/main/skald/appcast.xml>
+
+**B. Local clone** (cleaner if you do this often):
 ```bash
-rm Skald.zip
-ditto -c -k --keepParent Skald.app Skald-0.2.0.zip
+gh repo clone ivshestakov/panic-kit ~/code/panic-kit
+cd ~/code/panic-kit
+# edit skald/appcast.xml
+git add skald/appcast.xml
+git commit -m "skald: appcast 0.3.1"
+git push
 ```
 
-### 4. Sign the update payload
+Vercel redeploys panic-kit within ~30 seconds. Existing installs poll
+the appcast every 24h (configurable via `SUScheduledCheckInterval` in
+Info.plist) and on next launch.
 
-```bash
-./Frameworks/Sparkle.framework/Versions/Current/Resources/../../../bin/sign_update Skald-0.2.0.zip
-```
+### 5. Sanity-check the update flow
 
-Outputs an `sparkle:edSignature` string and the file size. Both go into
-the appcast item.
+On any 0.3+ install:
+- Menu-bar → **Check for Updates…**
+- Should show "Skald 0.3.1 is now available" with the release notes.
+- Click **Install Update** → Sparkle downloads the DMG, mounts it,
+  copies the new app over the running one, relaunches.
 
-### 5. Update appcast.xml
+---
 
-Append a new `<item>` to your `appcast.xml` (modelled on
-`/tmp/sparkle/SampleAppcast.xml`):
+## Recovery scenarios
 
-```xml
-<item>
-  <title>Skald 0.2.0</title>
-  <pubDate>Mon, 01 Jun 2026 12:00:00 +0000</pubDate>
-  <sparkle:version>2</sparkle:version>
-  <sparkle:shortVersionString>0.2.0</sparkle:shortVersionString>
-  <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-  <description><![CDATA[
-    <ul>
-      <li>What's new in 0.2.0</li>
-    </ul>
-  ]]></description>
-  <enclosure
-    url="https://github.com/<user>/skald/releases/download/v0.2.0/Skald-0.2.0.zip"
-    sparkle:version="2"
-    sparkle:shortVersionString="0.2.0"
-    length="..."
-    type="application/octet-stream"
-    sparkle:edSignature="..." />
-</item>
-```
+**Lost the Sparkle private key.** Generate a new one
+(`generate_keys`). Bump version, ship a new release with the new
+public key in `Info.plist`. Existing installs can no longer
+auto-update — they'll be stuck on their current version and need a
+manual reinstall. (This is why §1.3 says back it up.)
 
-`generate_appcast` (also in `Frameworks/.../bin/`) can produce the whole
-file if you point it at a folder full of release zips.
+**Notarization rejected.** `notarytool log <submission-id>
+--keychain-profile skald-notarize` shows the full report. Most common
+cause is signing without `--timestamp` or without `--options=runtime`
+— both are set in `build.sh`. Second most common cause is an embedded
+binary not signed at all (every nested executable in the bundle must
+be signed, in inside-out order).
 
-### 6. Push the release
-
-1. Commit `appcast.xml` to the gh-pages branch.
-2. Create a GitHub Release tagged `v0.2.0`, attach `Skald-0.2.0.zip`.
-3. Existing installs detect the new appcast item on next launch (or via
-   menu-bar → Check for Updates…) and show the standard Sparkle update
-   prompt.
+**Sparkle update fails to install.** Check the Console.app log filtered
+by `Skald` for errors. Common causes:
+- DMG enclosure size in appcast doesn't match the actual file size
+  (a CDN cached the wrong version).
+- `sparkle:edSignature` doesn't verify (DMG was modified after signing).
