@@ -135,6 +135,13 @@ echo "==> Signing for Sparkle (EdDSA)"
 SPARKLE_LINE=$("$SPARKLE_BIN/sign_update" "$DMG_PATH")
 # Sample output: sparkle:edSignature="abc..." length="12345"
 
+# Stable-name alias. Uploading this as an extra asset lets the panic-kit
+# landing button stay at /releases/latest/download/Skald.dmg across
+# versions — GitHub resolves `latest` automatically.
+ALIAS_PATH="$DIST_DIR/Skald.dmg"
+cp "$DMG_PATH" "$ALIAS_PATH"
+echo "==> Stable alias: $ALIAS_PATH"
+
 SIZE_BYTES=$(stat -f %z "$DMG_PATH")
 PUB_DATE=$(LC_ALL=en_US.UTF-8 date -u +"%a, %d %b %Y %H:%M:%S +0000")
 DMG_URL="https://github.com/ivshestakov/skald.app/releases/download/v${VERSION}/${DMG_NAME}"
@@ -147,9 +154,11 @@ Release artifact ready: $DMG_PATH ($(du -h "$DMG_PATH" | awk '{print $1}'))
 
 Next steps:
 
-1. Upload the DMG to a new GitHub Release:
+1. Upload both DMGs to a new GitHub Release (Skald-${VERSION}.dmg is
+   the versioned artifact that Sparkle's appcast points at; Skald.dmg
+   is the stable alias the panic-kit landing button uses):
 
-     gh release create v${VERSION} "$DMG_PATH" \\
+     gh release create v${VERSION} "$DMG_PATH" "$ALIAS_PATH" \\
        --title "Skald ${VERSION}" \\
        --notes "Release notes here (markdown)"
 
