@@ -102,62 +102,55 @@ Service name was bumped from `com.ivshestakov.skald` →
 `com.ivshestakov.skald.v2` to migrate cleanly: old strict-ACL entries
 become orphaned and the user re-enters keys once.
 
-## Status (2026-05-13)
+## Status (2026-06-01)
 
-**Currently published: 0.2.2** —
-<https://github.com/ivshestakov/skald.app/releases/tag/v0.2.2>
+**Currently published: 0.3.0** — first signed + notarized release.
+<https://github.com/ivshestakov/skald.app/releases/tag/v0.3.0>
 
 Version history:
-- **0.3.0** (in flight): release infrastructure — `release.sh`
-  produces a signed + notarized DMG, Sparkle EdDSA keypair generated,
-  `docs/appcast.xml` skeleton on main, GitHub Pages set to serve `docs/`.
+- **0.3.0** (2026-06-01): signed + notarized DMG, Sparkle EdDSA
+  auto-update wired to `panic-kit.com/skald/appcast.xml`, product
+  page at `panic-kit.com/skald`. First Gatekeeper-clean release.
 - **0.2.2** (2026-05-13): paste, dictation, settings gear.
 - **0.2.1** (2026-05-05): hardened Claude prompt.
 - **0.2.0** (2026-04-27): `⌥`` quick-translate hotkey.
 - **0.1.0** (2026-04-25): first public release.
 
-✅ Done for publication:
-- Renamed to Skald (bundle ID `com.ivshestakov.skald`)
-- Min macOS 15.0
-- App icon `.icns` generated and embedded
-- LICENSE (MIT) + README.md + INSTALL.md + RELEASE.md
-- About Skald, Launch at Login, Check for Updates… in menu
-- Sparkle 2.9.1 framework embedded; CLI tools at
-  `TranslatorApp/Frameworks/Sparkle-bin/` for release pipeline
-- Library-validation entitlement so Sparkle loads under hardened runtime
-- Two customisable hotkeys (panel + quick-translate)
-- Universal binary (arm64 + x86_64)
-- **Release pipeline** (`release.sh`): build → sign with Dev ID →
-  notarize → staple → DMG → sign DMG → notarize DMG → staple DMG →
-  Sparkle sign. Prints ready-to-paste `<item>` for appcast.
-- Sparkle EdDSA public key in Info.plist (`SUPublicEDKey`); private key
-  in login keychain under `https://sparkle-project.org`.
-- Product page + appcast hosted on `panic-kit.com/skald` (Vercel-served
-  from the [ivshestakov/panic-kit](https://github.com/ivshestakov/panic-kit)
-  repo at `/skald/`). `SUFeedURL` in Info.plist points there.
+What's standing infra-wise:
+- Developer ID Application cert `Ivan Shestakov (975ZZPJQNB)`
+  installed in login keychain.
+- `notarytool` keychain profile `skald-notarize` (Apple ID
+  ivshestakov@gmail.com, Team ID 975ZZPJQNB). **Intune MDM
+  periodically wipes this item** — recreate via store-credentials
+  if release.sh complains.
+- Sparkle EdDSA public key in Info.plist:
+  `jxJctZXd7IIRthQEe2DyTHYZvNZ4gVv0/kbh4C94pgo=`. Private key in
+  login keychain under `https://sparkle-project.org`; backup at
+  `~/skald-sparkle-private.key` (move to 1Password ASAP).
+- Two DMG assets per release:
+  - `Skald-X.Y.Z.dmg` — versioned, in Sparkle appcast enclosure.
+  - `Skald.dmg` — stable alias for the landing's download button at
+    `releases/latest/download/Skald.dmg`.
+- `release.sh` is monolithic: build → sign Dev ID → notarize app →
+  staple → DMG → sign DMG → notarize DMG → staple DMG → Sparkle
+  sign → copy to `Skald.dmg`. Prints a ready-to-paste `<item>` block
+  for the appcast.
 
-⏳ Pending — manual steps before first signed release:
+Carried-over TODO (next session):
+1. Merge the open PR in skald.app (branch
+   `claude/nifty-babbage-5f8949`, 4 commits ahead of main, tag v0.3.0
+   already on it).
+2. Move `~/skald-sparkle-private.key` into 1Password and `rm` from
+   disk.
+3. Smoke-test: download from `panic-kit.com/skald`, install, verify
+   no Gatekeeper warning + Check for Updates says "up to date".
+4. Split `release.sh` into resumable phases so Intune wiping the
+   keychain profile mid-run doesn't force a full restart.
 
-1. **Generate Developer ID Application cert** at developer.apple.com,
-   install in login keychain. Dev account is paid; only the cert is
-   missing (`security find-identity` shows only "Apple Development",
-   which is for Xcode/local builds).
-
-2. **App-specific password + notarytool profile.** Create at
-   appleid.apple.com, store via
-   `xcrun notarytool store-credentials skald-notarize`.
-
-3. **Push panic-kit/main** with the new `/skald/` page + appcast
-   skeleton (changes prepared locally, not yet pushed).
-
-4. **Back up the Sparkle private key** offline. Losing it strands
-   every existing install from future auto-updates.
-
-5. **Run `./release.sh`**, upload DMG to a GitHub Release, paste
-   `<item>` into panic-kit's `skald/appcast.xml`.
-
-See `RELEASE.md` for the per-release procedure and `LAUNCH.md`
-Phase 0 for the launch-day checklist.
+See `RELEASE.md` for the per-release procedure, `LAUNCH.md`
+Phase 1 for what's next (demo video, Show HN, etc.), and the
+project memory file `skald_release_pipeline.md` for the operational
+playbook + gotchas.
 
 ## Decisions on file
 

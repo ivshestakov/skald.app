@@ -8,9 +8,14 @@ Cloud (платный proxy к Claude без BYOK) если будет спро�
 открываешь репо в новом чате с Claude, говоришь «делаем Phase 0, шаг 3»
 — по нему видно, что именно сделать.
 
-Текущий статус приложения: **Skald 0.2.2** опубликован,
-<https://github.com/ivshestakov/skald.app>. Подписан self-signed
-сертификатом, юзеры видят Gatekeeper warning при первом запуске.
+Текущий статус приложения: **Skald 0.3.0** опубликован,
+<https://github.com/ivshestakov/skald.app/releases/tag/v0.3.0>.
+**Signed + notarized**, никаких Gatekeeper warning'ов. Продуктовый
+лендинг на <https://panic-kit.com/skald>. Sparkle auto-update
+настроен, фид на panic-kit.com/skald/appcast.xml — будущие версии
+устанавливаются сами.
+
+**Phase 0 закрыт ✅.** Дальше — Phase 1 (лонч).
 
 ---
 
@@ -346,29 +351,42 @@ indie проектов.** Не надо насиловать монетизац�
 
 ---
 
-## Что есть прямо сейчас
+## Что есть прямо сейчас (Phase 0 закрыт ✅)
 
-- [x] App работает (0.3.0, версия поднята, ещё не зарелизена)
-- [x] GitHub repo public, README + INSTALL + LICENSE + RELEASE.md
-- [x] Universal binary (arm64 + x86_64)
-- [x] Sparkle EdDSA-ключи сгенерены, public key в Info.plist,
-      automatic checks включены
-- [x] `release.sh` собирает signed + notarized DMG, печатает готовый
-      `<item>` для appcast'а
-- [x] Продуктовая страница `panic-kit.com/skald` + `appcast.xml` в
-      panic-kit репо, SUFeedURL указывает туда
-- [x] Self-signed работает для dev (TCC grants держатся)
+- [x] **Skald 0.3.0 опубликован** — signed + notarized DMG на GitHub,
+      auto-update через panic-kit.com/skald/appcast.xml работает
+- [x] Developer ID Application cert установлен (Team ID `975ZZPJQNB`)
+- [x] notarytool keychain profile `skald-notarize` создан
+- [x] Sparkle EdDSA пара — public в Info.plist, private в keychain +
+      backup на диске (надо переложить в 1Password!)
+- [x] Продуктовая страница `panic-kit.com/skald` с direct DMG download
+      кнопкой (stable URL `releases/latest/download/Skald.dmg`)
+- [x] `release.sh` end-to-end: build → sign → notarize → DMG → notarize
+      DMG → Sparkle sign → stable alias copy. Печатает `<item>`.
+- [x] Universal binary (arm64 + x86_64), Sparkle 2.9.1 встроен
 - [x] Tone slider, оффлайн-фоллбек, два хоткея, dictation, gear icon
 
-## Что осталось перед первым публичным релизом
+## Хвосты с релиза (быстро добить в начале следующей сессии)
 
-1. **Сгенерировать Developer ID Application cert** (раздел 0.1) —
-   ~5 минут в браузере + Keychain Access.
-2. **Создать app-specific password + notarytool profile** (раздел 0.2) —
-   ~3 минуты.
-3. **Push panic-kit/main** (страница `/skald/` + `/skald/appcast.xml`
-   ждут пуша в [ivshestakov/panic-kit](https://github.com/ivshestakov/panic-kit)).
-4. **Забэкапить Sparkle private key** (раздел 0.3) — одна команда.
-5. **Запустить `./release.sh`** — производит signed/notarized DMG.
-6. **`gh release create v0.3.0`** + вставить `<item>` в
-   `skald/appcast.xml` репо panic-kit.
+1. **Merge PR `claude/nifty-babbage-5f8949` → main** в skald.app
+   (или локально `git checkout main && git merge --ff-only … && git push`).
+   На ветке tag `v0.3.0` уже есть и release уже опубликован.
+2. **Переложить `~/skald-sparkle-private.key` в 1Password** и удалить
+   с диска. Это единственная страховка от потери авто-обновлений.
+3. **Smoke test на чистой машине / другом аккаунте**: скачать DMG с
+   panic-kit.com/skald → перетащить в Applications → запустить → не
+   должно быть Gatekeeper warning'а. В меню «Check for Updates…» —
+   «Up to date».
+
+## Известные грабли pipeline (для будущих релизов)
+
+- **Intune MDM** периодически зачищает notarytool keychain profile.
+  Если `release.sh` упадёт с "No Keychain password item found for
+  profile: skald-notarize" — пере-создать профилем
+  `xcrun notarytool store-credentials skald-notarize ...` и дозапустить
+  оставшиеся шаги вручную (см. memory `skald_release_pipeline.md`,
+  раздел "If release.sh dies mid-flight").
+- **Первая нотаризация от нового Team ID** заняла 50 минут. Последующие
+  ~25 секунд. Не паниковать раньше 90 минут.
+- **0.2.x юзеры** не получат 0.3.0 через Sparkle — у них appcast был
+  отключён. Им нужно установить 0.3.0 вручную, дальше уже автомат.
