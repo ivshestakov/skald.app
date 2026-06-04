@@ -236,7 +236,10 @@ final class Settings {
         static let hotkey2KeyCode   = "skald.hotkey2KeyCode"
         static let hotkey2Modifiers = "skald.hotkey2Modifiers"
         static let hotkey2Display   = "skald.hotkey2Display"
+        static let inputHistory     = "skald.inputHistory"
     }
+
+    static let inputHistoryLimit = 10
 
     private init() {}
 
@@ -349,6 +352,29 @@ final class Settings {
     var hotkey2Display: String {
         get { defaults.string(forKey: Key.hotkey2Display) ?? "`" }
         set { defaults.set(newValue, forKey: Key.hotkey2Display) }
+    }
+
+    /// Most-recent-first list of phrases the user has typed into the panel
+    /// (translated or not), capped at `inputHistoryLimit`. Cycled via Up/Down
+    /// arrows in the panel's text field.
+    var inputHistory: [String] {
+        get { defaults.stringArray(forKey: Key.inputHistory) ?? [] }
+        set {
+            let trimmed = Array(newValue.prefix(Self.inputHistoryLimit))
+            defaults.set(trimmed, forKey: Key.inputHistory)
+        }
+    }
+
+    /// Push a new phrase onto the front of the history. Empty/whitespace-only
+    /// strings are ignored. Duplicates are deduped (existing occurrence is
+    /// removed before the new one is prepended) so the most-recent ordering
+    /// stays meaningful.
+    func recordInputHistory(_ raw: String) {
+        let phrase = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !phrase.isEmpty else { return }
+        var hist = inputHistory.filter { $0 != phrase }
+        hist.insert(phrase, at: 0)
+        inputHistory = hist
     }
 
     func apiKey(for engine: Engine) -> String? {
