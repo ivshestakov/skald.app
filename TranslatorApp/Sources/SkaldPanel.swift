@@ -141,10 +141,23 @@ final class SkaldPanel: NSObject {
 
     // Visible card size — the NSPanel is sized exactly to the card; the
     // native NSWindow shadow (hasShadow = true) gives us the outer glow,
-    // and NSVisualEffectView gives us real behind-window blur.
+    // and NSVisualEffectView gives us real behind-window blur. Height is
+    // dynamic: starts at `minCardHeight` for an empty / single-line input
+    // and grows upward (bottom edge stays anchored) as the user types,
+    // capped at `maxCardHeight`.
     private let cardWidth:  CGFloat = 560
-    private let cardHeight: CGFloat = 72
+    private let minCardHeight: CGFloat = 72
+    private let maxCardHeight: CGFloat = 360
     private let bottomMargin: CGFloat = 100
+    // Vertical padding between the input row and the panel's top/bottom
+    // edges. Total panel height = inputStack.height + 2 × verticalPadding.
+    // 22pt was the original layout's effective top/bottom padding when
+    // cardHeight was a fixed 72pt and the row was centered.
+    private let verticalPadding: CGFloat = 22
+    // Field height when the input is empty or fits on a single line. Matches
+    // the icon row's 28pt so the field's bottom edge sits flush with the
+    // icons regardless of content.
+    private let singleLineFieldHeight: CGFloat = 28
 
     private var panel: FloatingPanel?
     private var input: InputField?
@@ -158,7 +171,10 @@ final class SkaldPanel: NSObject {
     private let spinner = NSProgressIndicator()
     private let loaderLabel = NSTextField(labelWithString: "Translating…")
     private var previousApp: NSRunningApplication?
-    private var clickMonitor: Any?
+    private var resignKeyObserver: NSObjectProtocol?
+    // Drives the dynamic panel height. Updated whenever the input text
+    // changes; we then resize the panel from the bottom up to match.
+    private var fieldHeightConstraint: NSLayoutConstraint?
     // Invalidates in-flight completions if the user cancels (Escape /
     // outside click) before the network call returns.
     private var requestToken: UUID?
@@ -166,6 +182,10 @@ final class SkaldPanel: NSObject {
     // reports no connectivity, we route translations through Apple's
     // on-device engine regardless of what Settings says.
     private var userOfflineOverride: Bool = false
+    // Up/Down arrow walks through Settings.shared.inputHistory. -1 means
+    // "we're showing the user's freshly-typed text, not a history entry".
+    // Reset on every show().
+    private var historyIndex: Int = -1
 
     // MARK: show / hide
 
@@ -177,6 +197,11 @@ final class SkaldPanel: NSObject {
 
         input.stringValue = ""
         input.placeholderAttributedString = Self.placeholderString()
+        historyIndex = -1
+        // Reset to single-line height; the resize loop will grow it again
+        // if the user pastes long content or recalls a multi-line history
+        // entry.
+        fieldHeightConstraint?.constant = singleLineFieldHeight
         setLoading(false)
         updateOfflineVisual()
         updateStyleAccent()
@@ -186,7 +211,7 @@ final class SkaldPanel: NSObject {
             let sf = screen.visibleFrame
             let x = sf.minX + (sf.width - cardWidth) / 2
             let y = sf.minY + bottomMargin
-            panel.setFrame(NSRect(x: x, y: y, width: cardWidth, height: cardHeight),
+            panel.setFrame(NSRect(x: x, y: y, width: cardWidth, height: minCardHeight),
                            display: true)
         }
 
@@ -205,27 +230,64 @@ final class SkaldPanel: NSObject {
             panel.animator().alphaValue = 1.0
         }
 
-        installClickMonitor()
+        installResignKeyObserver()
     }
 
-    /// `restoreFocus` is false on click-outside dismissal — the click
-    /// itself activated whatever app it landed on, and re-activating
-    /// previousApp would steal focus back from there.
+    /// `restoreFocus` is false when the dismissal is part of opening another
+    /// of our own windows (Settings) — re-activating previousApp would steal
+    /// focus away from the window we just opened.
     func dismiss(restoreFocus: Bool = true) {
+        // Capture whatever the user had typed — submitted or not — so the
+        // next panel-open can recall it via Up arrow.
+        if let input { Settings.shared.recordInputHistory(input.stringValue) }
         requestToken = nil             // invalidate any in-flight translate()
         spinner.stopAnimation(nil)
         tonePopover?.close()
         tonePopover = nil
-        removeClickMonitor()
+        removeResignKeyObserver()
         panel?.orderOut(nil)
         if restoreFocus { previousApp?.activate() }
+    }
+
+    // MARK: outside-click dismissal
+
+    /// We dismiss the panel when it loses key-window status — the user has
+    /// clicked outside it (in another app, on the desktop, in the menu bar,
+    /// or in another window of our own app like Settings). Two legitimate
+    /// resign-key cases must NOT dismiss:
+    ///
+    ///  - Opening the tone popover (popover takes key from the panel).
+    ///  - The async dispatch lets `popover.isShown` settle before we check;
+    ///    without it the resign-key fires synchronously inside `pop.show`,
+    ///    before `isShown` flips to true.
+    private func installResignKeyObserver() {
+        removeResignKeyObserver()
+        guard let panel else { return }
+        resignKeyObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if let popover = self.tonePopover, popover.isShown { return }
+                self.dismiss(restoreFocus: false)
+            }
+        }
+    }
+
+    private func removeResignKeyObserver() {
+        if let obs = resignKeyObserver {
+            NotificationCenter.default.removeObserver(obs)
+            resignKeyObserver = nil
+        }
     }
 
     // MARK: build
 
     private func build() {
         let p = FloatingPanel(
-            contentRect: NSRect(x: 0, y: 0, width: cardWidth, height: cardHeight),
+            contentRect: NSRect(x: 0, y: 0, width: cardWidth, height: minCardHeight),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false
@@ -244,7 +306,7 @@ final class SkaldPanel: NSObject {
         p.appearance = NSAppearance(named: .darkAqua)
 
         // Root content view — rounded, clips the blur layer to a pill shape.
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: cardWidth, height: cardHeight))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: cardWidth, height: minCardHeight))
         root.wantsLayer = true
         root.layer?.cornerRadius = 16
         root.layer?.masksToBounds = true
@@ -282,9 +344,10 @@ final class SkaldPanel: NSObject {
 
         // Top-edge hairline highlight — 1pt of white catching "light" at
         // the curved upper rim. Standard glass-morphism trick that adds
-        // a lot of depth for almost no code.
+        // a lot of depth for almost no code. autoresizing keeps it pinned
+        // to the top edge as the panel grows in height.
         let topEdge = NSView(frame: NSRect(
-            x: 0, y: cardHeight - 1, width: cardWidth, height: 1
+            x: 0, y: minCardHeight - 1, width: cardWidth, height: 1
         ))
         topEdge.autoresizingMask = [.width, .minYMargin]
         topEdge.wantsLayer = true
@@ -304,12 +367,14 @@ final class SkaldPanel: NSObject {
         field.font = NSFont.systemFont(ofSize: 20, weight: .medium)
         field.textColor = .white
         field.delegate = self
-        field.target = self
-        field.action = #selector(onEnter)
-        field.cell?.usesSingleLineMode = true
-        field.cell?.wraps = false
-        field.cell?.isScrollable = true
-        field.lineBreakMode = .byClipping
+        // Multi-line + word wrap. With single-line off, NSTextField no
+        // longer fires its target/action on Enter (it would insert a
+        // newline instead) — onEnter is invoked from the text-field
+        // delegate's `insertNewline:` handler instead.
+        field.cell?.usesSingleLineMode = false
+        field.cell?.wraps = true
+        field.cell?.isScrollable = false
+        field.lineBreakMode = .byWordWrapping
         field.setContentHuggingPriority(.defaultLow, for: .horizontal)
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -351,10 +416,12 @@ final class SkaldPanel: NSObject {
         gear.toolTip = "Open Settings"
         gear.setContentHuggingPriority(.required, for: .horizontal)
 
-        // Row that shows when we're accepting input.
+        // Row that shows when we're accepting input. `.bottom` alignment
+        // pins the icons to the row's bottom edge, so as the field grows
+        // upward (multi-line wrap) the icons stay anchored at the bottom.
         let inputStack = NSStackView(views: [field, pill, off, gear])
         inputStack.orientation = .horizontal
-        inputStack.alignment = .centerY
+        inputStack.alignment = .bottom
         inputStack.spacing = 10
         inputStack.setCustomSpacing(14, after: field)
         inputStack.translatesAutoresizingMaskIntoConstraints = false
@@ -379,10 +446,22 @@ final class SkaldPanel: NSObject {
         loaderStack.isHidden = true
         root.addSubview(loaderStack)
 
+        // Field height drives the panel's overall height. Initialised at the
+        // single-line value (28pt — matching the icon row height) and updated
+        // by `resizePanelToContent()` whenever the user types or recalls
+        // history. Stored on `self` so the resize logic can mutate it.
+        let fhc = field.heightAnchor.constraint(equalToConstant: 28)
+        fhc.priority = .required
+
         NSLayoutConstraint.activate([
             inputStack.leadingAnchor.constraint(equalTo: root.leadingAnchor,  constant: 20),
             inputStack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16),
-            inputStack.centerYAnchor.constraint(equalTo: root.centerYAnchor),
+            // Bottom-pin the row instead of centering — as the field grows
+            // we want the icons (and the field's bottom edge) to stay put
+            // and the field's top to extend upward.
+            inputStack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -verticalPadding),
+
+            fhc,
 
             pill.widthAnchor.constraint(equalToConstant: 36),
             pill.heightAnchor.constraint(equalToConstant: 28),
@@ -394,6 +473,7 @@ final class SkaldPanel: NSObject {
             loaderStack.centerXAnchor.constraint(equalTo: root.centerXAnchor),
             loaderStack.centerYAnchor.constraint(equalTo: root.centerYAnchor),
         ])
+        self.fieldHeightConstraint = fhc
 
         // Escape during loading state (when field isn't first responder).
         p.onCancel = { [weak self] in self?.dismiss() }
@@ -552,12 +632,101 @@ final class SkaldPanel: NSObject {
             // First responder is lost when the field hides; make the panel
             // itself the responder so Escape reaches `cancelOperation`.
             panel?.makeFirstResponder(nil)
+            // While the spinner is showing, shrink the panel back to its
+            // single-line size — the multi-line field is hidden so the
+            // extra height would just be empty space around the spinner.
+            shrinkToMinHeight()
         } else {
             spinner.stopAnimation(nil)
         }
     }
 
+    private func shrinkToMinHeight() {
+        guard let panel else { return }
+        var f = panel.frame
+        guard f.size.height > minCardHeight + 0.5 else { return }
+        f.size.height = minCardHeight
+        panel.setFrame(f, display: true, animate: false)
+    }
+
+    // MARK: dynamic height
+
+    /// Recompute the field's height for its current text and resize the
+    /// panel to match, growing upward (the bottom edge stays anchored to
+    /// where the user originally placed it). Called on every keystroke and
+    /// after recalling a history entry.
+    private func resizePanelToContent() {
+        guard let panel, let input else { return }
+
+        let wrapWidth = textWrapWidth()
+        let measured  = ceil(measuredTextHeight(input.stringValue, width: wrapWidth))
+        let fieldH    = max(singleLineFieldHeight, measured)
+
+        // Don't grow off-screen.
+        let maxFieldH = maxCardHeight - 2 * verticalPadding
+        let cappedH   = min(fieldH, maxFieldH)
+
+        fieldHeightConstraint?.constant = cappedH
+
+        let panelH = cappedH + 2 * verticalPadding
+        var f = panel.frame
+        guard abs(f.size.height - panelH) > 0.5 else { return }
+        f.size.height = panelH
+        // origin.y unchanged → bottom edge stays put, top edge moves.
+        panel.setFrame(f, display: true, animate: false)
+    }
+
+    /// Width available to the field's text inside the input row. Subtracts
+    /// the row's leading/trailing margins, the three icons, and the spacings
+    /// between them (custom 14 after the field, default 10 between icons).
+    private func textWrapWidth() -> CGFloat {
+        let icons:    CGFloat = 36 + 32 + 28        // pill + off + gear
+        let spacings: CGFloat = 14 + 10 + 10        // field→pill, pill→off, off→gear
+        return cardWidth - 20 - 16 - icons - spacings
+    }
+
+    private func measuredTextHeight(_ text: String, width: CGFloat) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: 20, weight: .medium)
+        // Use a probe character for empty input so we get the natural
+        // single-line height instead of zero.
+        let probe = text.isEmpty ? "X" : text
+        return NSAttributedString(
+            string: probe,
+            attributes: [.font: font]
+        ).boundingRect(
+            with: NSSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        ).height
+    }
+
     // MARK: events
+
+    /// Walk through `Settings.shared.inputHistory`. `delta = +1` (Up arrow)
+    /// goes to an older entry; `delta = -1` (Down arrow) goes to a newer
+    /// entry, with `historyIndex == -1` meaning "back to a clean field".
+    /// Caret is moved to the end so the user can keep typing from where the
+    /// recalled phrase ends.
+    private func navigateHistory(delta: Int) {
+        guard let input else { return }
+        let history = Settings.shared.inputHistory
+        guard !history.isEmpty else { return }
+
+        let newIndex = max(-1, min(history.count - 1, historyIndex + delta))
+        guard newIndex != historyIndex else { return }
+        historyIndex = newIndex
+
+        if historyIndex == -1 {
+            input.stringValue = ""
+        } else {
+            input.stringValue = history[historyIndex]
+            if let editor = input.currentEditor() {
+                editor.selectedRange = NSRange(
+                    location: input.stringValue.utf16.count, length: 0
+                )
+            }
+        }
+        resizePanelToContent()
+    }
 
     @objc private func onEnter() {
         guard let input else { return }
@@ -667,43 +836,37 @@ final class SkaldPanel: NSObject {
         }
     }
 
-    // MARK: click-outside-to-dismiss
-
-    private func installClickMonitor() {
-        removeClickMonitor()
-        // Global monitor fires only for clicks in OTHER apps — exactly what
-        // we want. Clicks inside our own panel don't fire it, so the user
-        // can freely click in the text field without closing the panel.
-        clickMonitor = NSEvent.addGlobalMonitorForEvents(
-            matching: [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        ) { [weak self] _ in
-            // The click already activated whatever the user clicked into;
-            // don't re-steal focus back to previousApp.
-            self?.dismiss(restoreFocus: false)
-        }
-    }
-
-    private func removeClickMonitor() {
-        if let m = clickMonitor {
-            NSEvent.removeMonitor(m)
-            clickMonitor = nil
-        }
-    }
 }
 
 // MARK: - NSTextFieldDelegate
 
 extension SkaldPanel: NSTextFieldDelegate {
 
-    // Kept empty so the NSTextFieldDelegate conformance still has a method
-    // to hook into if we bring back a live-update indicator later.
-    func controlTextDidChange(_ notification: Notification) {}
+    func controlTextDidChange(_ notification: Notification) {
+        resizePanelToContent()
+    }
 
     func control(_ control: NSControl,
                  textView: NSTextView,
                  doCommandBy commandSelector: Selector) -> Bool {
         if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
             dismiss()
+            return true
+        }
+        // Multi-line wrap mode means Enter would insert a newline by default;
+        // we override it so Enter still submits, just like in the original
+        // single-line behaviour. (Pasted text with embedded newlines is not
+        // affected — paste goes through `paste:` not `insertNewline:`.)
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            onEnter()
+            return true
+        }
+        if commandSelector == #selector(NSResponder.moveUp(_:)) {
+            navigateHistory(delta: 1)
+            return true
+        }
+        if commandSelector == #selector(NSResponder.moveDown(_:)) {
+            navigateHistory(delta: -1)
             return true
         }
         return false
