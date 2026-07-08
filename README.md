@@ -34,17 +34,21 @@ and never touches your text unless you explicitly trigger a translation.
 
 Skald requires macOS 15 (Sequoia) or newer.
 
-### From a release (recommended)
+### With Homebrew
 
-Download the latest `Skald-<version>.zip` from the
+```bash
+brew tap ivshestakov/tap
+brew install --cask skald
+```
+
+### From a release
+
+Download `Skald.dmg` from the
 [Releases page](https://github.com/ivshestakov/skald.app/releases/latest),
-unzip, and drag `Skald.app` into `/Applications`.
+open it, and drag `Skald.app` into `/Applications`.
 
-The first time you launch, macOS Gatekeeper will warn that the app is from
-an unidentified developer (Skald is currently distributed under a
-self-signed certificate; an Apple Developer ID is on the roadmap).
-**Right-click** `Skald.app` → **Open** → **Open** to confirm — only
-required once.
+Either way, Skald is signed with an Apple Developer ID and notarized by
+Apple, so first launch is a normal double-click — no Gatekeeper warning.
 
 For the full first-run walkthrough (Accessibility grant, API keys),
 see [INSTALL.md](INSTALL.md).

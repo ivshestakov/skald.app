@@ -8,24 +8,29 @@
 
 ## First-time install
 
-1. **Download** `Skald-<version>.zip` from the
-   [Releases page](https://github.com/ivshestakov/skald.app/releases).
-2. **Unzip** — you'll get `Skald.app`.
-3. **Drag** `Skald.app` into `/Applications`.
-4. **First launch**: macOS will refuse to open with a message like
-   *"Skald can't be opened because Apple cannot check it for malicious
-   software"*. This is because Skald is currently distributed under a
-   self-signed certificate (a real Apple Developer ID is on the
-   roadmap). To bypass:
-   - **Right-click** `Skald.app` → **Open** → **Open** in the dialog.
-   - You only have to do this once.
-5. The Skald icon (a speech bubble) appears in the menu bar at the top
+**Via Homebrew** — skip straight to step 4 after:
+
+```bash
+brew tap ivshestakov/tap
+brew install --cask skald
+```
+
+**Manually:**
+
+1. **Download** `Skald.dmg` from the
+   [Releases page](https://github.com/ivshestakov/skald.app/releases/latest).
+2. **Open** the DMG and **drag** `Skald.app` into `/Applications`,
+   then eject the disk image.
+3. **Launch** Skald from `/Applications`. The app is signed with an
+   Apple Developer ID and notarized, so it opens with a normal
+   double-click — no Gatekeeper warning.
+4. The Skald icon (a speech bubble) appears in the menu bar at the top
    of the screen.
-6. **Press the hotkey** (default `⌥/`). The first time, macOS will ask
+5. **Press the hotkey** (default `⌥/`). The first time, macOS will ask
    for **Accessibility** permission so Skald can paste the translation
    into other apps. Open *System Settings → Privacy & Security →
    Accessibility*, find Skald, switch the toggle on.
-7. **Test it**: press `⌥/` again, type "hello", press Enter. You should
+6. **Test it**: press `⌥/` again, type "hello", press Enter. You should
    see "привет" appear at your cursor.
 
 ## API keys

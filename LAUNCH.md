@@ -8,9 +8,11 @@ Cloud (платный proxy к Claude без BYOK) если будет спро�
 открываешь репо в новом чате с Claude, говоришь «делаем Phase 0, шаг 3»
 — по нему видно, что именно сделать.
 
-Текущий статус приложения: **Skald 0.2.2** опубликован,
-<https://github.com/ivshestakov/skald.app>. Подписан self-signed
-сертификатом, юзеры видят Gatekeeper warning при первом запуске.
+Текущий статус приложения: **Skald 0.4.0** опубликован,
+<https://github.com/ivshestakov/skald.app>. Подписан Developer ID
+(Team `975ZZPJQNB`) и нотаризован — Gatekeeper warning больше нет.
+**Phase 0 выполнена целиком в 0.3.0 (2026-06-01).** Старые self-signed
+релизы 0.1.0–0.2.2 удалены с GitHub 2026-07-08.
 
 ---
 
@@ -19,7 +21,7 @@ Cloud (платный proxy к Claude без BYOK) если будет спро�
 Цель: убрать все технические трения перед лончем. Без этого нет смысла
 куда-то постить — конверсия будет нулевая.
 
-### 0.1. Apple Developer ID — $99/год  *(оплачен, нужен только cert)*
+### 0.1. Apple Developer ID — ✅ сделано
 
 Сам аккаунт уже есть. Осталось сгенерировать сертификат
 **Developer ID Application** (это НЕ то же самое, что «Apple
@@ -40,7 +42,7 @@ Development» — последний только для локального Xc
   ```
   Должно вывести `Developer ID Application: Ivan Shestakov (975ZZPJQNB)`.
 
-### 0.2. Notarization keychain profile
+### 0.2. Notarization keychain profile — ✅ сделано
 
 Нужен **app-specific password** (не основной пароль Apple ID).
 
@@ -90,7 +92,7 @@ curl -fsSI https://panic-kit.com/skald/appcast.xml
 несколько доменов на один деплой. Тогда `skald.app` будет
 проксировать на текущий `/skald/` контент. Не блокер для лонча.
 
-### 0.6. Релиз 0.3.0 — первая чистая сборка
+### 0.6. Релиз 0.3.0 — первая чистая сборка — ✅ сделано (2026-06-01)
 
 Когда 0.1, 0.2, и panic-kit запушен в main:
 
@@ -348,27 +350,18 @@ indie проектов.** Не надо насиловать монетизац�
 
 ## Что есть прямо сейчас
 
-- [x] App работает (0.3.0, версия поднята, ещё не зарелизена)
+- [x] App работает, **0.4.0 опубликован** (signed + notarized DMG)
 - [x] GitHub repo public, README + INSTALL + LICENSE + RELEASE.md
 - [x] Universal binary (arm64 + x86_64)
-- [x] Sparkle EdDSA-ключи сгенерены, public key в Info.plist,
-      automatic checks включены
+- [x] Sparkle авто-обновления работают: appcast на
+      `panic-kit.com/skald/appcast.xml`, public key в Info.plist
 - [x] `release.sh` собирает signed + notarized DMG, печатает готовый
       `<item>` для appcast'а
-- [x] Продуктовая страница `panic-kit.com/skald` + `appcast.xml` в
-      panic-kit репо, SUFeedURL указывает туда
-- [x] Self-signed работает для dev (TCC grants держатся)
+- [x] Продуктовая страница `panic-kit.com/skald`
+- [x] Старые self-signed релизы 0.1.0–0.2.2 удалены с GitHub (2026-07-08)
 - [x] Tone slider, оффлайн-фоллбек, два хоткея, dictation, gear icon
 
-## Что осталось перед первым публичным релизом
-
-1. **Сгенерировать Developer ID Application cert** (раздел 0.1) —
-   ~5 минут в браузере + Keychain Access.
-2. **Создать app-specific password + notarytool profile** (раздел 0.2) —
-   ~3 минуты.
-3. **Push panic-kit/main** (страница `/skald/` + `/skald/appcast.xml`
-   ждут пуша в [ivshestakov/panic-kit](https://github.com/ivshestakov/panic-kit)).
-4. **Забэкапить Sparkle private key** (раздел 0.3) — одна команда.
-5. **Запустить `./release.sh`** — производит signed/notarized DMG.
-6. **`gh release create v0.3.0`** + вставить `<item>` в
-   `skald/appcast.xml` репо panic-kit.
+**Phase 0 закрыта.** Дальше по плану — Phase 1 (лонч: демо-видео,
+Show HN, r/macapps). Единственный хвост из Phase 0: перенести бэкап
+Sparkle private key (`skald-sparkle-private.key`) в 1Password и удалить
+файл с диска.
