@@ -71,6 +71,17 @@ enum Engine: String, CaseIterable {
         case .claude: return "Claude (Anthropic)"
         }
     }
+
+    /// Bare vendor name, for prose where `displayName`'s parenthetical would
+    /// read badly ("Google (free, no key) is rate-limiting").
+    var shortName: String {
+        switch self {
+        case .apple:  return "Apple"
+        case .google: return "Google"
+        case .deepl:  return "DeepL"
+        case .claude: return "Claude"
+        }
+    }
 }
 
 /// Tone/register axis for LLM-based translation. Ordered from cold/formal

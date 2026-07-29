@@ -186,6 +186,10 @@ final class SkaldPanel: NSObject {
     // "we're showing the user's freshly-typed text, not a history entry".
     // Reset on every show().
     private var historyIndex: Int = -1
+    // Whatever was in the field when the user first pressed Up. Stashed so
+    // that walking back down past the newest entry returns the half-typed
+    // draft instead of clearing the field. Same contract as a shell prompt.
+    private var historyDraft: String = ""
 
     // MARK: show / hide
 
@@ -198,6 +202,7 @@ final class SkaldPanel: NSObject {
         input.stringValue = ""
         input.placeholderAttributedString = Self.placeholderString()
         historyIndex = -1
+        historyDraft = ""
         // Reset to single-line height; the resize loop will grow it again
         // if the user pastes long content or recalls a multi-line history
         // entry.
@@ -703,9 +708,9 @@ final class SkaldPanel: NSObject {
 
     /// Walk through `Settings.shared.inputHistory`. `delta = +1` (Up arrow)
     /// goes to an older entry; `delta = -1` (Down arrow) goes to a newer
-    /// entry, with `historyIndex == -1` meaning "back to a clean field".
-    /// Caret is moved to the end so the user can keep typing from where the
-    /// recalled phrase ends.
+    /// entry, with `historyIndex == -1` meaning "back to what the user was
+    /// typing". Caret is moved to the end so the user can keep typing from
+    /// where the recalled phrase ends.
     private func navigateHistory(delta: Int) {
         guard let input else { return }
         let history = Settings.shared.inputHistory
@@ -713,17 +718,18 @@ final class SkaldPanel: NSObject {
 
         let newIndex = max(-1, min(history.count - 1, historyIndex + delta))
         guard newIndex != historyIndex else { return }
+
+        // Leaving the live field for the first time — keep the draft so the
+        // walk back down can restore it.
+        if historyIndex == -1 { historyDraft = input.stringValue }
         historyIndex = newIndex
 
-        if historyIndex == -1 {
-            input.stringValue = ""
-        } else {
-            input.stringValue = history[historyIndex]
-            if let editor = input.currentEditor() {
-                editor.selectedRange = NSRange(
-                    location: input.stringValue.utf16.count, length: 0
-                )
-            }
+        input.stringValue = historyIndex == -1 ? historyDraft
+                                               : history[historyIndex]
+        if let editor = input.currentEditor() {
+            editor.selectedRange = NSRange(
+                location: input.stringValue.utf16.count, length: 0
+            )
         }
         resizePanelToContent()
     }
@@ -736,6 +742,13 @@ final class SkaldPanel: NSObject {
             return
         }
 
+        runTranslation(text)
+    }
+
+    /// One translate → paste round-trip. Split out of `onEnter` so the failure
+    /// alert's Retry button can repeat the exact same request after the panel
+    /// has already been dismissed.
+    private func runTranslation(_ text: String) {
         // Keep the panel visible but swap in the loader so the user sees
         // something is happening between Enter and paste. The panel is
         // dismissed only once the result lands.
@@ -743,7 +756,8 @@ final class SkaldPanel: NSObject {
         requestToken = token
         setLoading(true)
 
-        translate(text, engine: effectiveEngine()) { [weak self] result in
+        let engine = effectiveEngine()
+        translate(text, engine: engine) { [weak self] result in
             guard let self, self.requestToken == token else { return }
             switch result {
             case .success(let translated):
@@ -751,8 +765,9 @@ final class SkaldPanel: NSObject {
                 self.pasteBack(translated)
             case .failure(let err):
                 self.dismiss()
-                NSLog("Skald: translate error: %@", String(describing: err))
-                Self.showTranslateError(err)
+                TranslateAlert.present(err, engine: engine) { [weak self] in
+                    self?.runTranslation(text)
+                }
             }
         }
     }
@@ -771,29 +786,6 @@ final class SkaldPanel: NSObject {
                 .kern: 1.0,
             ]
         )
-    }
-
-    private static func showTranslateError(_ err: Error) {
-        let alert = NSAlert()
-        alert.messageText = "Translation failed"
-        alert.informativeText = String(describing: err)
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "OK")
-
-        // For missing-key errors, offer a shortcut to open Settings.
-        let offersSettings: Bool = {
-            if case TranslateError.missingKey = err { return true }
-            return false
-        }()
-        if offersSettings {
-            alert.addButton(withTitle: "Open Settings…")
-        }
-
-        NSApp.activate(ignoringOtherApps: true)
-        let response = alert.runModal()
-        if offersSettings, response == .alertSecondButtonReturn {
-            (NSApp.delegate as? AppDelegate)?.openSettings()
-        }
     }
 
     // MARK: paste
