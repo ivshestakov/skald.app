@@ -102,15 +102,22 @@ Service name was bumped from `com.ivshestakov.skald` →
 `com.ivshestakov.skald.v2` to migrate cleanly: old strict-ACL entries
 become orphaned and the user re-enters keys once.
 
-## Status (2026-05-13)
+## Status (2026-07-08)
 
-**Currently published: 0.2.2** —
-<https://github.com/ivshestakov/skald.app/releases/tag/v0.2.2>
+**Currently published: 0.4.0** —
+<https://github.com/ivshestakov/skald.app/releases/tag/v0.4.0>
 
 Version history:
-- **0.3.0** (in flight): release infrastructure — `release.sh`
-  produces a signed + notarized DMG, Sparkle EdDSA keypair generated,
-  `docs/appcast.xml` skeleton on main, GitHub Pages set to serve `docs/`.
+- **0.4.0** (2026-06-04): multi-line input (panel grows upward, capped
+  ~360pt), input history recall via Up/Down arrows (last 10 phrases,
+  persisted), reliable outside-click dismissal
+  (`windowDidResignKey` instead of global mouse-down monitor).
+- **0.3.0** (2026-06-01): first signed + notarized public release —
+  Developer ID (Team `975ZZPJQNB`), distribution switched zip → DMG,
+  Sparkle auto-updates live via `panic-kit.com/skald/appcast.xml`,
+  product page at `panic-kit.com/skald`. Old self-signed zip releases
+  0.1.0–0.2.2 were deleted from GitHub on 2026-07-08 (they were never
+  notarized).
 - **0.2.2** (2026-05-13): paste, dictation, settings gear.
 - **0.2.1** (2026-05-05): hardened Claude prompt.
 - **0.2.0** (2026-04-27): `⌥`` quick-translate hotkey.
@@ -136,25 +143,19 @@ Version history:
   from the [ivshestakov/panic-kit](https://github.com/ivshestakov/panic-kit)
   repo at `/skald/`). `SUFeedURL` in Info.plist points there.
 
-⏳ Pending — manual steps before first signed release:
+✅ Done as of 0.3.0 (2026-06-01) — release infrastructure is live:
+- Developer ID Application cert installed (`Ivan Shestakov (975ZZPJQNB)`)
+- notarytool keychain profile `skald-notarize` (Intune MDM occasionally
+  wipes it — recreate via `xcrun notarytool store-credentials` if
+  release.sh fails with "No Keychain password item found")
+- panic-kit.com serves the product page + appcast
+- Every release: run `./release.sh`, `gh release create` with both DMGs
+  (`Skald-X.Y.Z.dmg` + stable-alias `Skald.dmg`), paste `<item>` into
+  panic-kit's `skald/appcast.xml`. See RELEASE.md.
 
-1. **Generate Developer ID Application cert** at developer.apple.com,
-   install in login keychain. Dev account is paid; only the cert is
-   missing (`security find-identity` shows only "Apple Development",
-   which is for Xcode/local builds).
-
-2. **App-specific password + notarytool profile.** Create at
-   appleid.apple.com, store via
-   `xcrun notarytool store-credentials skald-notarize`.
-
-3. **Push panic-kit/main** with the new `/skald/` page + appcast
-   skeleton (changes prepared locally, not yet pushed).
-
-4. **Back up the Sparkle private key** offline. Losing it strands
-   every existing install from future auto-updates.
-
-5. **Run `./release.sh`**, upload DMG to a GitHub Release, paste
-   `<item>` into panic-kit's `skald/appcast.xml`.
+⏳ Still pending: move the Sparkle private-key backup
+(`skald-sparkle-private.key`) into 1Password and delete it from disk.
+Losing the key strands every install from future auto-updates.
 
 See `RELEASE.md` for the per-release procedure and `LAUNCH.md`
 Phase 0 for the launch-day checklist.
@@ -163,6 +164,10 @@ Phase 0 for the launch-day checklist.
 
 - License: MIT
 - Distribution: GitHub Releases (signed + notarized .dmg), no App Store
+- **Homebrew: every release must be installable via
+  `brew install --cask skald`** — bump `version` + `sha256` in
+  [ivshestakov/homebrew-tap](https://github.com/ivshestakov/homebrew-tap)
+  `Casks/skald.rb` as part of the release procedure (RELEASE.md §5)
 - Localization: English only
 - Min macOS: 15.0 (Sequoia)
 - Auto-update: Sparkle 2.9.1, EdDSA-signed, appcast served from

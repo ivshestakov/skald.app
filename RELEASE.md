@@ -144,10 +144,15 @@ stapled, and Sparkle-signed.
 ### 3. Publish a GitHub Release
 
 ```bash
-gh release create v0.3.1 TranslatorApp/dist/Skald-0.3.1.dmg \
+gh release create v0.3.1 \
+  TranslatorApp/dist/Skald-0.3.1.dmg TranslatorApp/dist/Skald.dmg \
   --title "Skald 0.3.1" \
   --notes-file <(printf '## What's new\n\n- thing 1\n- thing 2\n')
 ```
+
+Attach **both** DMGs: the versioned one is what the appcast and the
+Homebrew cask point at; the `Skald.dmg` alias keeps the stable
+`/releases/latest/download/Skald.dmg` URL (product-page button) alive.
 
 ### 4. Update appcast.xml (in the panic-kit repo)
 
@@ -176,7 +181,24 @@ Vercel redeploys panic-kit within ~30 seconds. Existing installs poll
 the appcast every 24h (configurable via `SUScheduledCheckInterval` in
 Info.plist) and on next launch.
 
-### 5. Sanity-check the update flow
+### 5. Bump the Homebrew cask
+
+The cask lives in
+[ivshestakov/homebrew-tap](https://github.com/ivshestakov/homebrew-tap)
+at `Casks/skald.rb`. Update `version` and `sha256`:
+
+```bash
+shasum -a 256 TranslatorApp/dist/Skald-0.3.1.dmg   # copy the hash
+cd "$(brew --repository)/Library/Taps/ivshestakov/homebrew-tap"
+# edit Casks/skald.rb: version + sha256
+git commit -am "skald 0.3.1" && git push
+```
+
+Installed brew users are unaffected either way (`auto_updates true` —
+Sparkle updates the app in place); the bump only matters for fresh
+`brew install --cask skald` runs.
+
+### 6. Sanity-check the update flow
 
 On any 0.3+ install:
 - Menu-bar → **Check for Updates…**

@@ -20,6 +20,7 @@ DerivedData/
 # Local signing artifacts
 *.p12
 *.pem
+*.key
 
 # Editor
 .vscode/

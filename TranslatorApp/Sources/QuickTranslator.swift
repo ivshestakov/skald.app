@@ -66,19 +66,30 @@ enum QuickTranslator {
                 ? .apple
                 : Settings.shared.engine
 
-            translate(source, engine: engine) { result in
-                switch result {
-                case .success(let translated):
-                    Pasteboard.pasteAndRestore(
-                        text: translated,
-                        restoreClipboard: originalClipboard
-                    )
-                case .failure(let err):
-                    NSLog("Skald: quick-translate error: %@", String(describing: err))
-                    showAlert(
-                        title: "Translation failed",
-                        detail: String(describing: err)
-                    )
+            performTranslation(source,
+                               engine: engine,
+                               restoreClipboard: originalClipboard)
+        }
+    }
+
+    /// One translate → paste round-trip. Factored out of `run()` so the
+    /// failure alert's Retry button can repeat the request without re-reading
+    /// the selection (the clipboard has already been clobbered by our ⌘C).
+    private static func performTranslation(_ source: String,
+                                           engine: Engine,
+                                           restoreClipboard: String?) {
+        translate(source, engine: engine) { result in
+            switch result {
+            case .success(let translated):
+                Pasteboard.pasteAndRestore(
+                    text: translated,
+                    restoreClipboard: restoreClipboard
+                )
+            case .failure(let err):
+                TranslateAlert.present(err, engine: engine) {
+                    performTranslation(source,
+                                       engine: engine,
+                                       restoreClipboard: restoreClipboard)
                 }
             }
         }
