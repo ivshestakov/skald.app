@@ -13,7 +13,7 @@ settings:
     SWIFT_VERSION: "5.0"
     DEVELOPMENT_TEAM: 975ZZPJQNB
     CODE_SIGN_STYLE: Automatic
-    MARKETING_VERSION: "0.1.0"
+    MARKETING_VERSION: "1.0"
     CURRENT_PROJECT_VERSION: "1"
     TARGETED_DEVICE_FAMILY: "1,2"
     SWIFT_STRICT_CONCURRENCY: minimal
@@ -42,6 +42,8 @@ targets:
       properties:
         CFBundleDisplayName: Skald
         CFBundleName: Skald
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UISupportedInterfaceOrientations~ipad:
@@ -83,6 +85,8 @@ targets:
       properties:
         CFBundleDisplayName: Skald
         CFBundleName: SkaldKeyboard
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
         NSExtension:
           NSExtensionPointIdentifier: com.apple.keyboard-service
