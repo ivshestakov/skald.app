@@ -86,8 +86,11 @@ App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
     this session. **Undo** (after an insertion) takes it back.
   - **Style button**: a panel over the keys with *Layouts* (which languages
     the space-bar swipe cycles), *Translate to*, *Engine*
-    (Apple / Google / DeepL / Claude) and *Style*: five tone icons over a
-    gradient slider that snaps to them, plus an on/off switch (Claude only).
+    (Apple / Google / DeepL / Claude) with a one-line hint per engine (cost,
+    limits) and, for DeepL / Claude, **Paste key** from the clipboard (needs
+    Full Access; keys can also be entered in the app) and Clear. With Claude
+    a *Style* row appears: five tone icons over a gradient slider that snaps
+    to them — style is always on for Claude.
 - Direction in the translation field: current layout → "translate to"
   (or → primary when you're typing in the "translate to" language, or the
   language picked in the panel). In-place translation of existing text

@@ -295,7 +295,7 @@ struct KeyView: View {
         case .backspace:
             Image(systemName: pressed ? "delete.left.fill" : "delete.left").font(.system(size: 18))
         case .space:
-            ZStack(alignment: .bottomTrailing) {
+            ZStack(alignment: model.keyboardLanguages.count > 1 ? .bottom : .bottomTrailing) {
                 Color.clear
                 if model.keyboardLanguages.count > 1 {
                     HStack {
@@ -310,7 +310,7 @@ struct KeyView: View {
                 Text(spaceCode)
                     .font(.system(size: 10))
                     .foregroundStyle(KeyboardPalette.secondaryText(scheme).opacity(0.8))
-                    .padding(.trailing, 7)
+                    .padding(.trailing, model.keyboardLanguages.count > 1 ? 0 : 7)
                     .padding(.bottom, 4)
             }
         case .ret:
@@ -502,10 +502,8 @@ struct TranslateSettingsPanel: View {
     @ObservedObject var model: KeyboardModel
     @Environment(\.colorScheme) private var scheme
 
-    private let tones = Tone.allCases
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
             Rectangle()
                 .fill(KeyboardPalette.secondaryText(scheme).opacity(0.25))
                 .frame(height: 0.5)
@@ -536,24 +534,12 @@ struct TranslateSettingsPanel: View {
                     }
                 }
             }
-            HStack(alignment: .center, spacing: 8) {
-                Text("Style")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 78, alignment: .leading)
-                ToneSliderView(model: model)
-                Toggle("", isOn: Binding(get: { model.settings.adaptStyleEnabled }, set: { model.setAdaptStyle($0) }))
-                    .labelsHidden()
-                    .tint(model.settings.tone.color)
+            engineDetails
+            if model.settings.engine == .claude {
+                row("Style") { ToneSliderView(model: model) }
             }
-            .opacity(model.settings.engine == .claude ? 1 : 0.35)
-            .disabled(model.settings.engine != .claude)
             HStack(alignment: .center, spacing: 8) {
-                Text(model.settings.engine != .claude
-                     ? "Style adaptation needs the Claude engine."
-                     : (model.settings.adaptStyleEnabled
-                        ? "\(model.settings.tone.displayName): \(model.settings.tone.subtitle)"
-                        : "Style off — the translation keeps your tone."))
+                Text(footer)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -563,7 +549,7 @@ struct TranslateSettingsPanel: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
-                        .frame(height: 28)
+                        .frame(height: 26)
                         .background(Color.accentColor, in: Capsule())
                 }
                 .buttonStyle(.plain)
@@ -573,6 +559,66 @@ struct TranslateSettingsPanel: View {
         .padding(.horizontal, 10)
         .padding(.top, 2)
         .foregroundStyle(KeyboardPalette.text(scheme))
+    }
+
+    /// One line under the engine chips: what the engine costs, and for
+    /// DeepL / Claude the API-key controls.
+    @ViewBuilder
+    private var engineDetails: some View {
+        let engine = model.settings.engine
+        HStack(spacing: 6) {
+            Text("")
+                .frame(width: 78)
+            switch engine {
+            case .apple:
+                hint("Free, on your device, works offline. Language packs download in the Skald app.")
+            case .google:
+                hint("Free, unofficial endpoint. No published limit — Google may throttle after a burst of requests.")
+            case .deepl, .claude:
+                let has = model.settings.hasApiKey(for: engine)
+                Image(systemName: has ? "checkmark.seal.fill" : "key")
+                    .font(.system(size: 12))
+                    .foregroundStyle(has ? Color.green : Color.secondary)
+                Text(model.keyMessage ?? (has ? "Key saved" : (engine == .deepl
+                     ? "No key. Free plan: 500k chars/month."
+                     : "No key. Pay per use, ~$0.0001/phrase (Haiku).")))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                smallButton("Paste key") { model.pasteAPIKey(for: engine) }
+                if has { smallButton("Clear") { model.clearAPIKey(for: engine) } }
+            }
+        }
+        .frame(height: 24)
+    }
+
+    private func hint(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var footer: String {
+        if model.settings.engine == .claude {
+            return "\(model.settings.tone.displayName): \(model.settings.tone.subtitle)"
+        }
+        return "Style adaptation is available with the Claude engine."
+    }
+
+    private func smallButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.horizontal, 9)
+                .frame(height: 24)
+                .background(KeyboardPalette.key(scheme), in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private func row<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -591,7 +637,7 @@ struct TranslateSettingsPanel: View {
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(selected ? .white : KeyboardPalette.text(scheme))
                 .padding(.horizontal, 10)
-                .frame(height: 30)
+                .frame(height: 28)
                 .background(Capsule().fill(selected ? tint : KeyboardPalette.key(scheme)))
         }
         .buttonStyle(.plain)
@@ -776,14 +822,15 @@ struct ToneSliderView: View {
         GeometryReader { geo in
             let w = geo.size.width
             let step = w / CGFloat(tones.count - 1)
-            let sel = model.settings.adaptStyleEnabled ? model.settings.tone : .original
+
+            let sel = model.settings.tone
             let x = CGFloat(sel.rawValue) * step
             ZStack(alignment: .topLeading) {
                 // icons
                 ForEach(tones) { t in
                     Image(systemName: t.symbolName)
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(t == sel && model.settings.adaptStyleEnabled ? t.color : Color.secondary)
+                        .foregroundStyle(t == sel ? t.color : Color.secondary)
                         .frame(width: 24, height: 18)
                         .position(x: CGFloat(t.rawValue) * step, y: 9)
                 }
@@ -791,10 +838,9 @@ struct ToneSliderView: View {
                 Capsule()
                     .fill(LinearGradient(colors: tones.map { $0.color }, startPoint: .leading, endPoint: .trailing))
                     .frame(height: 6)
-                    .opacity(model.settings.adaptStyleEnabled ? 1 : 0.35)
                     .position(x: w / 2, y: 32)
                 ForEach(tones) { t in
-                    Circle().fill(KeyboardPalette.background(scheme)).frame(width: 4, height: 4)
+                    Circle().fill(KeyboardPalette.background(scheme)).frame(width: 5, height: 5)
                         .position(x: CGFloat(t.rawValue) * step, y: 32)
                 }
                 // thumb
@@ -819,6 +865,6 @@ struct ToneSliderView: View {
     private func select(at x: CGFloat, step: CGFloat) {
         let i = min(max(Int((x / step).rounded()), 0), tones.count - 1)
         let t = tones[i]
-        if !model.settings.adaptStyleEnabled || model.settings.tone != t { model.setTone(t) }
+        if model.settings.tone != t { model.setTone(t) }
     }
 }

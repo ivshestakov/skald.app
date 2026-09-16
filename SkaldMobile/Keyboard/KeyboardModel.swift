@@ -847,8 +847,38 @@ final class KeyboardModel: ObservableObject {
     func setEngine(_ e: Engine) {
         host?.playClick()
         settings.engine = e
+        if e == .claude { settings.adaptStyleEnabled = true }   // style is always on with Claude
+        keyMessage = nil
         objectWillChange.send()
         if translateMode { schedulePreview() }
+    }
+
+    /// Feedback line under the engine row after Paste key / Clear.
+    @Published var keyMessage: String?
+
+    /// API key entry inside the keyboard: from the clipboard (needs Full Access).
+    func pasteAPIKey(for engine: Engine) {
+        host?.playClick()
+        guard host?.hasFullAccess == true else { keyMessage = "Allow Full Access to read the clipboard, or add the key in the Skald app."; return }
+        let raw = (UIPasteboard.general.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { keyMessage = "Clipboard is empty — copy the API key first."; return }
+        let looksRight: Bool
+        switch engine {
+        case .claude: looksRight = raw.hasPrefix("sk-ant-") && raw.count > 20
+        case .deepl:  looksRight = raw.count >= 36 && raw.contains("-")
+        default:      looksRight = false
+        }
+        guard looksRight else { keyMessage = "That doesn't look like a \(engine.shortName) key."; return }
+        settings.setApiKey(raw, for: engine)
+        keyMessage = "\(engine.shortName) key saved."
+        objectWillChange.send()
+    }
+
+    func clearAPIKey(for engine: Engine) {
+        host?.playClick()
+        settings.setApiKey(nil, for: engine)
+        keyMessage = "\(engine.shortName) key removed."
+        objectWillChange.send()
     }
 
     func setAdaptStyle(_ on: Bool) {
