@@ -378,6 +378,7 @@ final class KeyboardModel: ObservableObject {
     }
 
     private func replaceBeforeCaret(count: Int, with text: String) {
+        let base = textBeforeCaret
         lastEditAt = Date()
         if translateMode {
             composer.removeLast(min(count, composer.count)); composer += text
@@ -387,6 +388,7 @@ final class KeyboardModel: ObservableObject {
             for _ in 0..<count { proxy.deleteBackward() }
             proxy.insertText(text)
             clearUndoIfEdited()
+            updateAutoShift(before: String(base.dropLast(min(count, base.count))) + text)
         }
     }
 
@@ -540,15 +542,16 @@ final class KeyboardModel: ObservableObject {
             if translateMode {
                 composer.removeLast(); composer += ". "
                 schedulePreview()
+                textDidChange()
             } else {
                 host?.proxy.deleteBackward()
                 host?.proxy.insertText(". ")
                 clearUndoIfEdited()
+                afterLocalEdit(before: String(before.dropLast()) + ". ")
             }
             lastSpaceTap = .distantPast
             lastInsertWasPunctuation = false
             lastAutocorrect = nil
-            textDidChange()
             return
         }
         if page != .letters, lastInsertWasPunctuation {
@@ -564,6 +567,7 @@ final class KeyboardModel: ObservableObject {
     /// Inserts text where typing currently goes: the composer in translate
     /// mode, the document otherwise.
     private func insertRaw(_ s: String) {
+        let base = textBeforeCaret
         lastEditAt = Date()
         if translateMode {
             composer += s
@@ -572,6 +576,15 @@ final class KeyboardModel: ObservableObject {
             host?.proxy.insertText(s)
             clearUndoIfEdited()
         }
+        afterLocalEdit(before: base + s)
+    }
+
+    /// After one of our own edits the host's context may lag or come back
+    /// empty, and iOS doesn't always send textDidChange for the keyboard's
+    /// own insertions — so auto-capitalisation is decided from the text we
+    /// know we produced.
+    private func afterLocalEdit(before: String) {
+        if !translateMode { updateAutoShift(before: before) }
         textDidChange()
     }
 
@@ -585,14 +598,16 @@ final class KeyboardModel: ObservableObject {
     private func backspaceOnce() {
         lastEditAt = Date()
         if revertAutocorrectIfNeeded() { return }
+        let base = textBeforeCaret
         if translateMode, !composer.isEmpty {
             composer.removeLast()
             schedulePreview()
+            textDidChange()
         } else {
             host?.proxy.deleteBackward()
             clearUndoIfEdited()
+            afterLocalEdit(before: String(base.dropLast()))
         }
-        textDidChange()
     }
 
     private var backspaceCount = 0
