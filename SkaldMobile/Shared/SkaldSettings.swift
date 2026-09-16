@@ -26,6 +26,9 @@ final class SkaldSettings: ObservableObject {
         static let history       = "skald.history"
         static let kbLanguages   = "skald.keyboardLanguages"
         static let recentEmoji   = "skald.recentEmoji"
+        static let haptics       = "skald.haptics"
+        static let autocorrect   = "skald.autocorrect"
+        static let suggestions   = "skald.suggestions"
     }
 
     private init() {
@@ -74,6 +77,22 @@ final class SkaldSettings: ObservableObject {
             return stored.isEmpty ? [primaryLanguage, secondaryLanguage] : stored
         }
         set { defaults.set(newValue.map(\.rawValue), forKey: Key.kbLanguages); objectWillChange.send() }
+    }
+
+    /// Key-press haptics (needs Full Access in the keyboard extension).
+    var hapticsEnabled: Bool {
+        get { defaults.object(forKey: Key.haptics) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.haptics); objectWillChange.send() }
+    }
+
+    var autocorrectEnabled: Bool {
+        get { defaults.object(forKey: Key.autocorrect) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.autocorrect); objectWillChange.send() }
+    }
+
+    var suggestionsEnabled: Bool {
+        get { defaults.object(forKey: Key.suggestions) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.suggestions); objectWillChange.send() }
     }
 
     static let recentEmojiLimit = 32

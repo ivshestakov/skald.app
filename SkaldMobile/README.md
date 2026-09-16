@@ -26,6 +26,19 @@ App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
 - Full keyboard with shift, caps (double-tap), numbers and symbols pages,
   long-press alternates (ъ, ё, ґ, ß, é, ą, …), backspace repeat,
   auto-capitalisation at sentence start, system key clicks.
+- **System typing behaviours**: double space → ". " (consecutive presses after
+  a word), space after punctuation on the 123/#+= page returns to letters,
+  magnified key pop-up while pressed, light haptic on every key (needs Full
+  Access), key click sound.
+- **Auto-correction & suggestions**: per-language frequency dictionaries
+  (OpenSubtitles 2018 top-50k, `Keyboard/Resources/freq_*.txt`, CC-BY-SA) +
+  edit-distance candidates weighted by key adjacency on the current layout,
+  with the system `UITextChecker` as a validity check so rare real words are
+  left alone. Correction happens on space/punctuation; backspace right after
+  reverts it. The top bar shows the typed word (quoted) and up to two
+  fixes/completions while typing. Not the system's language model — no
+  context — but it handles the common one-word typo. Toggles in Settings →
+  Typing.
 - **Language key** (`RU` / `UK` / `EN`…): cycles through the layouts chosen
   under Settings → Keyboard layouts; long-press shows a picker. The idea is
   to keep only the English system keyboard and let Skald cover the rest.
@@ -122,8 +135,7 @@ Group.
   been verified inside the extension at all.
 - `documentContextBeforeInput` only reaches back to the current paragraph;
   multi-paragraph messages translate paragraph by paragraph.
-- No swipe typing, no autocorrect/predictions (the top bar sits where the
-  system's predictive bar would be).
+- No swipe typing; autocorrect is dictionary-based, not contextual.
 - CJK languages fall back to the Latin layout (you can still translate text
   typed with a system CJK keyboard by switching to Skald and tapping
   Translate).

@@ -87,4 +87,18 @@ final class KeyboardViewController: UIInputViewController, KeyboardHost {
     func playClick() {
         UIDevice.current.playInputClick()
     }
+
+    // UIFeedbackGenerator only fires inside a keyboard extension when the
+    // user granted Full Access; without it the call is a silent no-op.
+    private lazy var haptic: UIImpactFeedbackGenerator = {
+        let g = UIImpactFeedbackGenerator(style: .light)
+        g.prepare()
+        return g
+    }()
+
+    func playHaptic() {
+        guard hasFullAccess else { return }
+        haptic.impactOccurred(intensity: 0.8)
+        haptic.prepare()
+    }
 }

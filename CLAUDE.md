@@ -84,7 +84,10 @@ Ivan wants a mobile version as a **translating keyboard**. It lives in
   typing, RU/UK/EN layouts + language key, long-press alternates, emoji
   panel, Translate *mode* (composer + live preview, Return inserts), Undo,
   light/dark styling matched to the system keyboard (iOS 26.4 sim + iOS 27
-  photos). Not yet run on a device; Apple on-device engine unverified
+  photos), double-space period, punctuation→letters, key pop-up, haptics,
+  frequency-dictionary autocorrect + suggestions (see SkaldMobile/README.md).
+  TestFlight: app "Skald Translator" (6812791271), upload via
+  `SkaldMobile/release-ios.sh` (manual signing + altool). Not yet run on a device; Apple on-device engine unverified
   inside the extension. Ivan's goal: keep only the English system keyboard
   and let Skald replace the RU/UK ones, so it must look identical to iOS 27.
 

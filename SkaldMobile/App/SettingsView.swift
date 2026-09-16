@@ -39,6 +39,16 @@ struct SettingsView: View {
                     Text("The language key on the Skald keyboard cycles through these, so you can remove the matching system keyboards.")
                 }
 
+                Section {
+                    Toggle("Auto-correction", isOn: binding(\.autocorrectEnabled))
+                    Toggle("Suggestions", isOn: binding(\.suggestionsEnabled))
+                    Toggle("Haptic feedback", isOn: binding(\.hapticsEnabled))
+                } header: {
+                    Text("Typing")
+                } footer: {
+                    Text("Corrections use the system spelling dictionaries for the layout language. Backspace right after a correction restores what you typed. Haptics need Allow Full Access.")
+                }
+
                 Section("Engine") {
                     Picker("Engine", selection: binding(\.engine)) {
                         ForEach(Engine.allCases) { Text($0.displayName).tag($0) }

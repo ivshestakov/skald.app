@@ -9,6 +9,7 @@ protocol KeyboardHost: AnyObject {
     var needsInputModeSwitchKey: Bool { get }
     func advanceToNextInputMode()
     func playClick()
+    func playHaptic()
 }
 
 enum ShiftState { case off, on, caps }
@@ -24,6 +25,12 @@ enum TranslateStatus: Equatable {
     case busy
     case done
     case error(String)
+}
+
+/// Magnified key shown while a character key is held (system "Character Preview").
+struct KeyPreview: Equatable {
+    let glyph: String
+    let keyFrame: CGRect
 }
 
 /// Long-press popup: character alternates, or the keyboard-language picker.
@@ -48,6 +55,10 @@ final class KeyboardModel: ObservableObject {
     @Published var direction: LanguagePair
     @Published private(set) var undo: UndoRecord?
     @Published var popup: KeyPopup?
+    @Published var keyPreview: KeyPreview?
+    @Published var suggestions: [String] = []
+    /// Set right after an automatic correction; backspace reverts it.
+    private var lastAutocorrect: (original: String, replacement: String, separator: String)?
 
     // Translate mode: keystrokes go into `composer`, `preview` is the live
     // translation, Return inserts the preview into the document.
@@ -62,6 +73,8 @@ final class KeyboardModel: ObservableObject {
 
     private var shiftIsAuto = true
     private var lastShiftTap: Date = .distantPast
+    private var lastSpaceTap: Date = .distantPast
+    private var lastInsertWasPunctuation = false
     private var repeatTimer: Timer?
     private var task: Task<Void, Never>?
 
@@ -69,6 +82,7 @@ final class KeyboardModel: ObservableObject {
         let s = SkaldSettings.shared
         direction = LanguagePair(source: s.primaryLanguage, target: s.secondaryLanguage)
         emojiCategory = s.recentEmoji.isEmpty ? (EmojiData.categories.first?.id ?? "") : "recent"
+        Autocorrect.shared.preload(s.keyboardLanguages)
     }
 
     // MARK: - Languages / layouts
@@ -106,6 +120,7 @@ final class KeyboardModel: ObservableObject {
 
     func tap(_ key: Key) {
         host?.playClick()
+        if settings.hapticsEnabled { host?.playHaptic() }
         switch key {
         case .char(let s):
             insert(s)
@@ -121,7 +136,7 @@ final class KeyboardModel: ObservableObject {
         case .backspace:
             backspaceOnce()
         case .space:
-            insert(" ")
+            tapSpace()
         case .ret:
             if translateMode, !composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 commitComposer()
@@ -138,13 +153,129 @@ final class KeyboardModel: ObservableObject {
         }
     }
 
+    private static let punctuation: Set<Character> = [".", ",", "?", "!", ";", ":"]
+
     private func insert(_ raw: String) {
         var s = raw
         if page == .letters, shift != .off {
             s = s.uppercased()
             if shift == .on { shift = .off; shiftIsAuto = false }
         }
+        lastInsertWasPunctuation = raw.count == 1 && Self.punctuation.contains(raw.first!)
+        lastSpaceTap = .distantPast
+        if lastInsertWasPunctuation { autocorrectCurrentWord(separator: s) }
+        if lastAutocorrect?.separator == s { return }   // autocorrect already inserted it
+        lastAutocorrect = nil
         insertRaw(s)
+    }
+
+    // MARK: - Autocorrect
+
+    /// Text before the caret, wherever typing currently goes.
+    private var textBeforeCaret: String {
+        translateMode ? composer : (host?.proxy.documentContextBeforeInput ?? "")
+    }
+
+    /// The word the caret is in (letters only), or "" at a word boundary.
+    private var currentWord: String {
+        String(textBeforeCaret.reversed().prefix { $0.isLetter || $0 == "'" || $0 == "’" || $0 == "-" }.reversed())
+    }
+
+    private func replaceBeforeCaret(count: Int, with text: String) {
+        if translateMode {
+            composer.removeLast(min(count, composer.count)); composer += text
+            schedulePreview()
+        } else {
+            guard let proxy = host?.proxy else { return }
+            for _ in 0..<count { proxy.deleteBackward() }
+            proxy.insertText(text)
+            clearUndoIfEdited()
+        }
+    }
+
+    /// Called when a word is finished with `separator`. Replaces the word if
+    /// the spell checker has a confident fix; inserts the separator itself in
+    /// that case (so the caller must not).
+    private func autocorrectCurrentWord(separator: String) {
+        lastAutocorrect = nil
+        guard settings.autocorrectEnabled, page == .letters else { return }
+        let word = currentWord
+        guard let fix = Autocorrect.shared.correction(for: word, language: currentLanguage, layout: currentLayout) else { return }
+        replaceBeforeCaret(count: word.count, with: fix.replacement + separator)
+        lastAutocorrect = (word, fix.replacement, separator)
+        suggestions = []
+        textDidChange()
+    }
+
+    /// Backspace right after an autocorrect puts the original word back.
+    private func revertAutocorrectIfNeeded() -> Bool {
+        guard let ac = lastAutocorrect else { return false }
+        lastAutocorrect = nil
+        let before = textBeforeCaret
+        guard before.hasSuffix(ac.replacement + ac.separator) else { return false }
+        replaceBeforeCaret(count: ac.replacement.count + ac.separator.count, with: ac.original + ac.separator)
+        textDidChange()
+        return true
+    }
+
+    /// Tap on a suggestion in the top bar: replace the current word.
+    func acceptSuggestion(_ s: String) {
+        host?.playClick()
+        if settings.hapticsEnabled { host?.playHaptic() }
+        let word = currentWord
+        var text = s
+        if text.hasPrefix("\""), text.hasSuffix("\"") { text = String(text.dropFirst().dropLast()) }   // keep as typed
+        replaceBeforeCaret(count: word.count, with: text + " ")
+        lastAutocorrect = nil
+        lastSpaceTap = .distantPast
+        textDidChange()
+    }
+
+    private func updateSuggestions() {
+        guard settings.suggestionsEnabled, page == .letters, status == .idle || translateMode else { suggestions = []; return }
+        let word = currentWord
+        let next = word.isEmpty ? [] : Autocorrect.shared.suggestions(forPartial: word, language: currentLanguage, layout: currentLayout)
+        if next != suggestions { suggestions = next }
+    }
+
+    /// Space with the two system shortcuts: a quick double space after a
+    /// word becomes ". ", and space after punctuation typed on the numbers
+    /// or symbols page jumps back to the letters page.
+    private func tapSpace() {
+        let now = Date()
+        // Consecutive space presses (nothing typed in between) — the system
+        // keyboard doesn't time them either, it only requires a word before.
+        let quick = lastSpaceTap != .distantPast
+        let before = translateMode ? composer : (host?.proxy.documentContextBeforeInput ?? "")
+        let wordEnd: Bool = {
+            // "…word " → last char is one space, char before it is a letter/number
+            guard before.hasSuffix(" "), before.count >= 2 else { return false }
+            let prev = before[before.index(before.endIndex, offsetBy: -2)]
+            return prev.isLetter || prev.isNumber || prev == ")" || prev == "\"" || prev == "'"
+        }()
+        if quick && wordEnd {
+            if translateMode {
+                composer.removeLast(); composer += ". "
+                schedulePreview()
+            } else {
+                host?.proxy.deleteBackward()
+                host?.proxy.insertText(". ")
+                clearUndoIfEdited()
+            }
+            lastSpaceTap = .distantPast
+            lastInsertWasPunctuation = false
+            lastAutocorrect = nil
+            textDidChange()
+            return
+        }
+        if page != .letters, lastInsertWasPunctuation {
+            page = .letters
+        }
+        lastInsertWasPunctuation = false
+        lastSpaceTap = now
+        autocorrectCurrentWord(separator: " ")
+        if lastAutocorrect != nil { return }
+        insertRaw(" ")
     }
 
     /// Inserts text where typing currently goes: the composer in translate
@@ -162,11 +293,13 @@ final class KeyboardModel: ObservableObject {
 
     func insertEmoji(_ e: String) {
         host?.playClick()
+        if settings.hapticsEnabled { host?.playHaptic() }
         settings.recordEmoji(e)
         insertRaw(e)
     }
 
     private func backspaceOnce() {
+        if revertAutocorrectIfNeeded() { return }
         if translateMode, !composer.isEmpty {
             composer.removeLast()
             schedulePreview()
@@ -199,6 +332,7 @@ final class KeyboardModel: ObservableObject {
     /// Called by the controller on textDidChange and after our own edits.
     func textDidChange() {
         guard let proxy = host?.proxy else { return }
+        defer { updateSuggestions() }
         if translateMode {
             updateAutoShift(before: composer)
             if composer.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -237,6 +371,15 @@ final class KeyboardModel: ObservableObject {
         }
     }
 
+    // MARK: - Key preview (magnified key while pressed)
+
+    func showKeyPreview(_ glyph: String, keyFrame: CGRect) {
+        let cased = page == .letters && shift != .off ? glyph.uppercased() : glyph
+        keyPreview = KeyPreview(glyph: cased, keyFrame: keyFrame)
+    }
+
+    func hideKeyPreview() { keyPreview = nil }
+
     // MARK: - Long-press popups
 
     func showAlternates(for glyph: String, keyFrame: CGRect) -> Bool {
@@ -245,6 +388,7 @@ final class KeyboardModel: ObservableObject {
         let cased = page == .letters && shift != .off
         let options = ([glyph] + alts).map { cased ? $0.uppercased() : $0 }
         popup = KeyPopup(kind: .characters, options: options, keyFrame: keyFrame)
+        keyPreview = nil
         return true
     }
 
@@ -269,6 +413,7 @@ final class KeyboardModel: ObservableObject {
         guard let p = popup else { return }
         popup = nil
         host?.playClick()
+        if settings.hapticsEnabled { host?.playHaptic() }
         switch p.kind {
         case .characters:
             insertRaw(p.options[p.selected])

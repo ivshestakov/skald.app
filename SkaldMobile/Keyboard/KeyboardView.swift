@@ -50,6 +50,9 @@ struct KeyboardView: View {
         .background(KeyboardPalette.background(scheme))
         .coordinateSpace(name: "keyboard")
         .overlay(alignment: .topLeading) {
+            if let preview = model.keyPreview, model.popup == nil {
+                KeyPreviewView(preview: preview)
+            }
             if let popup = model.popup {
                 KeyPopupView(popup: popup, keyHeight: m.rowHeight)
             }
@@ -222,6 +225,7 @@ struct KeyButton: View {
                                 if pressed, pressID == id { model.startBackspaceRepeat() }
                             }
                         case .char(let glyph):
+                            if model.page != .emoji { model.showKeyPreview(glyph, keyFrame: frame) }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                                 if pressed, pressID == id, model.showAlternates(for: glyph, keyFrame: frame) {
                                     popupShown = true
@@ -246,6 +250,7 @@ struct KeyButton: View {
                 .onEnded { _ in
                     pressed = false
                     pressID += 1
+                    model.hideKeyPreview()
                     if key == .backspace {
                         model.stopBackspaceRepeat()
                     } else if popupShown {
@@ -395,6 +400,25 @@ struct TopBar: View {
     @ViewBuilder
     private var statusView: some View {
         switch model.status {
+        case .idle where !model.suggestions.isEmpty && !model.translateMode:
+            HStack(spacing: 0) {
+                ForEach(Array(model.suggestions.enumerated()), id: \.offset) { i, s in
+                    if i > 0 {
+                        Rectangle().fill(KeyboardPalette.secondaryText(scheme).opacity(0.4))
+                            .frame(width: 1, height: 22)
+                    }
+                    Button { model.acceptSuggestion(s) } label: {
+                        Text(s)
+                            .font(.system(size: 16))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 36)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         case .idle:
             EmptyView()
         case .busy:
@@ -630,5 +654,36 @@ struct SmileyIcon: View {
             .stroke(face, style: StrokeStyle(lineWidth: size * 0.11, lineCap: .round))
         }
         .frame(width: size, height: size)
+    }
+}
+
+// MARK: - Character preview (magnified key)
+
+/// The system keyboard's key pop-up: the pressed key grows upward into a
+/// wider, taller rounded rectangle showing the glyph large.
+struct KeyPreviewView: View {
+    let preview: KeyPreview
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let k = preview.keyFrame
+        let width = max(k.width * 1.7, 46)
+        let height = k.height * 2.35
+        let screenWidth = UIScreen.main.bounds.width
+        var x = k.midX - width / 2
+        x = min(max(x, 2), screenWidth - width - 2)
+        let y = k.maxY - height
+        return ZStack(alignment: .top) {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(KeyboardPalette.key(scheme))
+                .shadow(color: .black.opacity(scheme == .dark ? 0.6 : 0.25), radius: 4, y: 1)
+            Text(preview.glyph)
+                .font(.system(size: 40, weight: .light))
+                .foregroundStyle(KeyboardPalette.text(scheme))
+                .frame(height: k.height * 1.35)
+        }
+        .frame(width: width, height: height)
+        .offset(x: x, y: y)
+        .allowsHitTesting(false)
     }
 }

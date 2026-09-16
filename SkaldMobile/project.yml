@@ -64,7 +64,10 @@ targets:
     platform: iOS
     sources:
       - path: Keyboard
+        excludes: ["Resources/**"]
       - path: Shared
+      - path: Keyboard/Resources
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ivshestakov.skald.ios.keyboard
