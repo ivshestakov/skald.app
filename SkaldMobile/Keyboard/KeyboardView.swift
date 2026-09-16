@@ -505,7 +505,10 @@ struct TranslateSettingsPanel: View {
     private let tones = Tone.allCases
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 8) {
+            Rectangle()
+                .fill(KeyboardPalette.secondaryText(scheme).opacity(0.25))
+                .frame(height: 0.5)
             row("Layouts") {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
@@ -545,30 +548,30 @@ struct TranslateSettingsPanel: View {
             }
             .opacity(model.settings.engine == .claude ? 1 : 0.35)
             .disabled(model.settings.engine != .claude)
-            Text(model.settings.engine != .claude
-                 ? "Style adaptation needs the Claude engine."
-                 : (model.settings.adaptStyleEnabled
-                    ? "\(model.settings.tone.displayName): \(model.settings.tone.subtitle)"
-                    : "Style off — the translation keeps your tone."))
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            Spacer(minLength: 0)
-            HStack {
-                Spacer()
+            HStack(alignment: .center, spacing: 8) {
+                Text(model.settings.engine != .claude
+                     ? "Style adaptation needs the Claude engine."
+                     : (model.settings.adaptStyleEnabled
+                        ? "\(model.settings.tone.displayName): \(model.settings.tone.subtitle)"
+                        : "Style off — the translation keeps your tone."))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 Button(action: model.toggleSettings) {
                     Text("Done")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
-                        .frame(height: 30)
+                        .frame(height: 28)
                         .background(Color.accentColor, in: Capsule())
                 }
                 .buttonStyle(.plain)
             }
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 10)
-        .padding(.top, 4)
+        .padding(.top, 2)
         .foregroundStyle(KeyboardPalette.text(scheme))
     }
 
@@ -809,7 +812,7 @@ struct ToneSliderView: View {
                     .onEnded { v in select(at: v.location.x, step: step) }
             )
         }
-        .frame(height: 40)
+        .frame(height: 38)
         .padding(.horizontal, 12)
     }
 
