@@ -30,7 +30,7 @@ enum TranslateStatus: Equatable {
 /// Magnified key shown while a character key is held (system "Character Preview").
 struct KeyPreview: Equatable {
     let glyph: String
-    let keyFrame: CGRect
+    let key: Key
 }
 
 /// Long-press popup: character alternates, or the keyboard-language picker.
@@ -57,6 +57,16 @@ final class KeyboardModel: ObservableObject {
     @Published var popup: KeyPopup?
     @Published var keyPreview: KeyPreview?
     @Published var suggestions: [String] = []
+    @Published var pressedKeys: Set<Key> = []
+    @Published var cursorMode = false
+    @Published var metrics = KeyboardMetrics.portrait
+    // Host text-field traits (UIKeyboardType & co.)
+    @Published var numberPadStyle: NumberPadStyle?
+    @Published var bottomExtras: [String] = []       // e.g. ["@", "."] for e-mail fields
+    @Published var returnKeyTinted = false
+    private var correctionsDisabled = false
+    /// User's Settings → Keyboard → Text Replacement shortcuts.
+    var lexicon: [String: String] = [:]
     /// Set right after an automatic correction; backspace reverts it.
     private var lastAutocorrect: (original: String, replacement: String, separator: String)?
 
@@ -118,9 +128,14 @@ final class KeyboardModel: ObservableObject {
 
     // MARK: - Key handling
 
+    /// Programmatic key press (emoji panel's ABC/backspace, tests).
     func tap(_ key: Key) {
         host?.playClick()
         if settings.hapticsEnabled { host?.playHaptic() }
+        perform(key)
+    }
+
+    private func perform(_ key: Key) {
         switch key {
         case .char(let s):
             insert(s)
@@ -151,6 +166,101 @@ final class KeyboardModel: ObservableObject {
         case .globe:    host?.advanceToNextInputMode()
         case .language: nextLanguage()
         }
+    }
+
+    // MARK: - Touch API (driven by KeyTouchUIView)
+
+    private var pageBeforeGlide: KeyboardPage?
+
+    func keyDown(_ key: Key) {
+        host?.playClick()
+        if settings.hapticsEnabled { host?.playHaptic() }
+        pressedKeys.insert(key)
+        switch key {
+        case .char(let g):
+            showKeyPreview(g, keyFrame: nil)
+        case .backspace:
+            backspaceOnce()
+            backspaceCount = 1
+        case .numbers, .symbols, .letters:
+            // Switch on touch-down so a glide to a digit works.
+            pageBeforeGlide = page
+            perform(key)
+        default:
+            break
+        }
+    }
+
+    /// Finger slid from one key to another without lifting.
+    func keyMoved(from: Key?, to: Key?, start: Key) {
+        if let from { pressedKeys.remove(from) }
+        if let to { pressedKeys.insert(to) }
+        if case .char(let g)? = to { showKeyPreview(g, keyFrame: nil) } else { keyPreview = nil }
+    }
+
+    func keyReleased(_ key: Key, releasedOn: Key?, start: Key) {
+        pressedKeys.remove(key)
+        if let r = releasedOn { pressedKeys.remove(r) }
+        hideKeyPreviewSoon()
+        stopBackspaceRepeat()
+        guard let target = releasedOn else { pageBeforeGlide = nil; return }
+
+        switch (start, target) {
+        case (.backspace, _), (.numbers, .numbers), (.symbols, .symbols), (.letters, .letters):
+            break                                   // acted on touch-down
+        case (.shift, .char(let g)):
+            // Glide from shift: one capital, shift state untouched.
+            let keep = shift
+            shift = .on
+            insert(g)
+            shift = keep
+        case (.numbers, .char), (.symbols, .char), (.letters, .char):
+            // Glide from a page key: type the key under the finger, go back.
+            perform(target)
+            if start == .numbers, let back = pageBeforeGlide { page = back }
+        case (.shift, .shift):
+            perform(.shift)
+        case (_, .shift), (_, .numbers), (_, .symbols), (_, .letters):
+            break                                   // slid onto a mode key: nothing
+        default:
+            perform(target)
+        }
+        pageBeforeGlide = nil
+    }
+
+    func keyCancelled(_ key: Key, current: Key?) {
+        pressedKeys.remove(key)
+        if let current { pressedKeys.remove(current) }
+        keyPreview = nil
+        stopBackspaceRepeat()
+    }
+
+    /// Long-press on a character or the language key.
+    func longPress(_ key: Key, frame: CGRect) -> Bool {
+        switch key {
+        case .char(let g):  return showAlternates(for: g, keyFrame: frame)
+        case .language:     return showLanguages(keyFrame: frame)
+        default:            return false
+        }
+    }
+
+    // MARK: Cursor trackpad (space bar long-press)
+
+    func beginCursorMode() -> Bool {
+        guard !translateMode else { return false }
+        cursorMode = true
+        keyPreview = nil
+        if settings.hapticsEnabled { host?.playHaptic() }
+        return true
+    }
+
+    func moveCursor(by n: Int) {
+        host?.proxy.adjustTextPosition(byCharacterOffset: n)
+    }
+
+    func endCursorMode() {
+        cursorMode = false
+        textDidChange()
     }
 
     private static let punctuation: Set<Character> = [".", ",", "?", "!", ";", ":"]
@@ -198,8 +308,18 @@ final class KeyboardModel: ObservableObject {
     /// that case (so the caller must not).
     private func autocorrectCurrentWord(separator: String) {
         lastAutocorrect = nil
-        guard settings.autocorrectEnabled, page == .letters else { return }
+        guard page == .letters, !correctionsDisabled else { return }
         let word = currentWord
+        guard !word.isEmpty else { return }
+        // Text replacements from Settings → Keyboard → Text Replacement win.
+        if let rep = lexicon[word.lowercased()] {
+            replaceBeforeCaret(count: word.count, with: rep + separator)
+            lastAutocorrect = (word, rep, separator)
+            suggestions = []
+            textDidChange()
+            return
+        }
+        guard settings.autocorrectEnabled else { return }
         guard let fix = Autocorrect.shared.correction(for: word, language: currentLanguage, layout: currentLayout) else { return }
         replaceBeforeCaret(count: word.count, with: fix.replacement + separator)
         lastAutocorrect = (word, fix.replacement, separator)
@@ -232,7 +352,7 @@ final class KeyboardModel: ObservableObject {
     }
 
     private func updateSuggestions() {
-        guard settings.suggestionsEnabled, page == .letters, status == .idle || translateMode else { suggestions = []; return }
+        guard settings.suggestionsEnabled, !correctionsDisabled, page == .letters, status == .idle || translateMode else { suggestions = []; return }
         let word = currentWord
         let next = word.isEmpty ? [] : Autocorrect.shared.suggestions(forPartial: word, language: currentLanguage, layout: currentLayout)
         if next != suggestions { suggestions = next }
@@ -310,17 +430,40 @@ final class KeyboardModel: ObservableObject {
         textDidChange()
     }
 
-    /// Long-press on backspace: repeat until released.
+    private var backspaceCount = 0
+
+    /// Long-press on backspace: repeat, then after a while delete whole words.
     func startBackspaceRepeat() {
         stopBackspaceRepeat()
-        repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.08, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.backspaceOnce() }
+        repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.backspaceCount += 1
+                if self.backspaceCount > 14 { self.deleteWordBackward() } else { self.backspaceOnce() }
+            }
         }
     }
 
     func stopBackspaceRepeat() {
         repeatTimer?.invalidate()
         repeatTimer = nil
+        backspaceCount = 0
+    }
+
+    private func deleteWordBackward() {
+        let before = textBeforeCaret
+        guard !before.isEmpty else { return }
+        let trailing = before.reversed().prefix { $0.isWhitespace || $0.isNewline }.count
+        let word = before.dropLast(trailing).reversed().prefix { !($0.isWhitespace || $0.isNewline) }.count
+        let n = max(1, trailing + word)
+        if translateMode {
+            composer.removeLast(min(n, composer.count)); schedulePreview()
+        } else {
+            for _ in 0..<n { host?.proxy.deleteBackward() }
+            clearUndoIfEdited()
+        }
+        lastAutocorrect = nil
+        textDidChange()
     }
 
     private func clearUndoIfEdited() {
@@ -330,8 +473,40 @@ final class KeyboardModel: ObservableObject {
     // MARK: - Context tracking
 
     /// Called by the controller on textDidChange and after our own edits.
+    /// Read the host text field's traits: keyboard type, autocorrection,
+    /// secure entry, return key. Called whenever the document changes.
+    func applyHostTraits() {
+        guard let proxy = host?.proxy else { return }
+        let style: NumberPadStyle?
+        switch proxy.keyboardType {
+        case .numberPad?, .asciiCapableNumberPad?: style = .plain
+        case .decimalPad?: style = .decimal
+        case .phonePad?, .namePhonePad?: style = proxy.keyboardType == .phonePad ? .phone : nil
+        default: style = nil
+        }
+        if style != numberPadStyle {
+            numberPadStyle = style
+            if style != nil { page = .numberPad } else if page == .numberPad { page = .letters }
+        }
+        let extras: [String]
+        switch proxy.keyboardType {
+        case .emailAddress?: extras = ["@", "."]
+        case .URL?, .webSearch?: extras = [".", "/"]
+        case .twitter?: extras = ["@", "#"]
+        default: extras = []
+        }
+        if extras != bottomExtras { bottomExtras = extras }
+        correctionsDisabled = (proxy.isSecureTextEntry ?? false) || proxy.autocorrectionType == .no
+            || proxy.keyboardType == .emailAddress || proxy.keyboardType == .URL
+        let tintTypes: [UIReturnKeyType] = [.go, .search, .send, .done, .join, .route, .emergencyCall, .continue]
+        let hasText = !(proxy.documentContextBeforeInput ?? "").isEmpty || !(proxy.documentContextAfterInput ?? "").isEmpty
+        let tinted = tintTypes.contains(proxy.returnKeyType ?? .default) && (!(proxy.enablesReturnKeyAutomatically ?? false) || hasText)
+        if tinted != returnKeyTinted { returnKeyTinted = tinted }
+    }
+
     func textDidChange() {
         guard let proxy = host?.proxy else { return }
+        applyHostTraits()
         defer { updateSuggestions() }
         if translateMode {
             updateAutoShift(before: composer)
@@ -347,6 +522,21 @@ final class KeyboardModel: ObservableObject {
 
     private func updateAutoShift(before: String) {
         guard page == .letters, shift != .caps else { return }
+        let capType = host?.proxy.autocapitalizationType ?? .sentences
+        if capType == .none {
+            if shift == .on, shiftIsAuto { shift = .off }
+            return
+        }
+        if capType == .allCharacters {
+            if shift == .off { shift = .on; shiftIsAuto = true }
+            return
+        }
+        if capType == .words {
+            let start = before.isEmpty || before.last!.isWhitespace || before.last!.isNewline
+            if start, shift == .off { shift = .on; shiftIsAuto = true }
+            else if !start, shift == .on, shiftIsAuto { shift = .off }
+            return
+        }
         let atSentenceStart: Bool = {
             let t = before
             if t.isEmpty { return true }
@@ -373,12 +563,27 @@ final class KeyboardModel: ObservableObject {
 
     // MARK: - Key preview (magnified key while pressed)
 
-    func showKeyPreview(_ glyph: String, keyFrame: CGRect) {
+    func showKeyPreview(_ glyph: String, keyFrame: CGRect?) {
+        guard page != .emoji else { return }
         let cased = page == .letters && shift != .off ? glyph.uppercased() : glyph
-        keyPreview = KeyPreview(glyph: cased, keyFrame: keyFrame)
+        previewToken += 1
+        keyPreview = KeyPreview(glyph: cased, key: .char(glyph))
     }
 
-    func hideKeyPreview() { keyPreview = nil }
+    private var previewToken = 0
+
+    /// Keep the pop-up ~100 ms after release like the system, so quick taps
+    /// still flash it.
+    func hideKeyPreviewSoon() {
+        previewToken += 1
+        let token = previewToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+            guard let self, self.previewToken == token else { return }
+            self.keyPreview = nil
+        }
+    }
+
+    func hideKeyPreview() { previewToken += 1; keyPreview = nil }
 
     // MARK: - Long-press popups
 
@@ -388,7 +593,7 @@ final class KeyboardModel: ObservableObject {
         let cased = page == .letters && shift != .off
         let options = ([glyph] + alts).map { cased ? $0.uppercased() : $0 }
         popup = KeyPopup(kind: .characters, options: options, keyFrame: keyFrame)
-        keyPreview = nil
+        hideKeyPreview()
         return true
     }
 
@@ -402,9 +607,10 @@ final class KeyboardModel: ObservableObject {
     }
 
     /// Drag tracking while the popup is up: `x` is in keyboard coordinates.
-    func updatePopupSelection(x: CGFloat, optionWidth: CGFloat, popupMinX: CGFloat) {
+    func updatePopupSelection(x: CGFloat) {
         guard var p = popup else { return }
-        let idx = Int(((x - popupMinX) / optionWidth).rounded(.down))
+        let layout = KeyPopupView.layout(for: p, keyHeight: metrics.rowHeight)
+        let idx = Int(((x - layout.frame.minX) / layout.optionWidth).rounded(.down))
         p.selected = min(max(idx, 0), p.options.count - 1)
         if p != popup { popup = p }
     }

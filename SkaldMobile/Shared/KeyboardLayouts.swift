@@ -14,7 +14,10 @@ enum Key: Hashable {
     case emoji            // open the emoji panel
 }
 
-enum KeyboardPage { case letters, numbers, symbols, emoji }
+enum KeyboardPage { case letters, numbers, symbols, emoji, numberPad }
+
+/// Which number pad a host field asked for (UIKeyboardType).
+enum NumberPadStyle { case plain, decimal, phone }
 
 struct LetterLayout: Equatable {
     let id: String
@@ -115,6 +118,10 @@ enum KeyAlternates {
         "'": ["‘","’","«","»"],
         "\"": ["“","”","„"],
         "$": ["€","£","¥","₴","₽"],
+        "0": ["°"],
+        "%": ["‰"],
+        "=": ["≠","≈"],
+        "/": ["\\"],
         "?": ["¿"],
         "!": ["¡"],
     ]

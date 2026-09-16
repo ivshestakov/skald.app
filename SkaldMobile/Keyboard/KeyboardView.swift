@@ -1,30 +1,52 @@
 import SwiftUI
 
 /// Visual constants tuned against the iOS system keyboard (see README:
-/// "Matching the system keyboard").
-enum KeyboardMetrics {
-    static let gap: CGFloat = 7
-    static let rowGap: CGFloat = 12
-    static let rowHeight: CGFloat = 42
-    static let sidePadding: CGFloat = 6
-    static let topBarHeight: CGFloat = 44
-    static let topPadding: CGFloat = 5
-    static let composerHeight: CGFloat = 56
-    static let keyCornerRadius: CGFloat = 7
-    static let bottomPadding: CGFloat = 4
-    static let smallKeyWidth: CGFloat = 43.5
+/// "Matching the system keyboard"). Two presets: portrait and landscape.
+struct KeyboardMetrics: Equatable {
+    var gap: CGFloat
+    var rowGap: CGFloat
+    var rowHeight: CGFloat
+    var sidePadding: CGFloat
+    var topBarHeight: CGFloat
+    var topPadding: CGFloat
+    var composerHeight: CGFloat
+    var keyCornerRadius: CGFloat
+    var bottomPadding: CGFloat
+    var smallKeyWidth: CGFloat
+    var letterFont: CGFloat
 
-    static var keysHeight: CGFloat { rowHeight * 4 + rowGap * 3 }
-    static func totalHeight(translateMode: Bool) -> CGFloat {
+    static let portrait = KeyboardMetrics(gap: 7, rowGap: 12, rowHeight: 42, sidePadding: 6, topBarHeight: 44,
+                                          topPadding: 5, composerHeight: 56, keyCornerRadius: 7, bottomPadding: 4,
+                                          smallKeyWidth: 43.5, letterFont: 23)
+    static let landscape = KeyboardMetrics(gap: 9, rowGap: 7, rowHeight: 33, sidePadding: 4, topBarHeight: 38,
+                                           topPadding: 3, composerHeight: 44, keyCornerRadius: 6, bottomPadding: 3,
+                                           smallKeyWidth: 60, letterFont: 20)
+
+    static func current(width: CGFloat, height: CGFloat) -> KeyboardMetrics {
+        width > height && width > 500 ? .landscape : .portrait
+    }
+
+    var keysHeight: CGFloat { rowHeight * 4 + rowGap * 3 }
+    func totalHeight(translateMode: Bool) -> CGFloat {
         topBarHeight + (translateMode ? composerHeight : 0) + topPadding + keysHeight + bottomPadding
+    }
+}
+
+/// Frames of the visible keys, in the "keyboard" coordinate space, collected
+/// from the key views for the UIKit touch layer.
+struct KeyFramesKey: PreferenceKey {
+    static var defaultValue: [Key: CGRect] = [:]
+    static func reduce(value: inout [Key: CGRect], nextValue: () -> [Key: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { $1 })
     }
 }
 
 struct KeyboardView: View {
     @ObservedObject var model: KeyboardModel
     @Environment(\.colorScheme) private var scheme
+    @State private var keyFrames: [Key: CGRect] = [:]
 
-    private let m = KeyboardMetrics.self
+    private var m: KeyboardMetrics { model.metrics }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -37,10 +59,10 @@ struct KeyboardView: View {
                     .padding(.horizontal, 8)
             }
             Group {
-                if model.page == .emoji {
-                    EmojiPanel(model: model)
-                } else {
-                    keyRows
+                switch model.page {
+                case .emoji:     EmojiPanel(model: model)
+                case .numberPad: numberPad
+                default:         keyRows
                 }
             }
             .frame(height: m.keysHeight)
@@ -49,9 +71,11 @@ struct KeyboardView: View {
         }
         .background(KeyboardPalette.background(scheme))
         .coordinateSpace(name: "keyboard")
+        .onPreferenceChange(KeyFramesKey.self) { keyFrames = $0 }
+        .overlay(KeyTouchView(model: model, frames: keyFrames))
         .overlay(alignment: .topLeading) {
-            if let preview = model.keyPreview, model.popup == nil {
-                KeyPreviewView(preview: preview)
+            if let preview = model.keyPreview, model.popup == nil, let f = keyFrames[preview.key] {
+                KeyPreviewView(glyph: preview.glyph, keyFrame: f, metrics: m)
             }
             if let popup = model.popup {
                 KeyPopupView(popup: popup, keyHeight: m.rowHeight)
@@ -77,7 +101,7 @@ struct KeyboardView: View {
 
     private var rows: [[Key]] {
         switch model.page {
-        case .letters, .emoji:
+        case .letters, .emoji, .numberPad:
             let l = model.currentLayout.rows
             return [
                 l[0].map(Key.char),
@@ -107,7 +131,6 @@ struct KeyboardView: View {
         rows.map { $0.filter(isChar).count }.max() ?? 10
     }
 
-    /// Width of one regular key, derived from the widest row.
     private func unit(_ width: CGFloat) -> CGFloat {
         let n = CGFloat(widestRow)
         return (width - m.gap * (n - 1)) / n
@@ -118,9 +141,6 @@ struct KeyboardView: View {
         let chars = row.filter(isChar).count
         let specials = row.count - chars
         let gaps = CGFloat(row.count - 1) * m.gap
-        // Shift/backspace take what's left, never less than a letter key; on
-        // 11–12 column layouts the letters in this row shrink a little, as on
-        // the system keyboard.
         let minSpecial = u * (widestRow <= 10 ? 1.25 : 1.0)
         let leftover = specials > 0 ? (width - CGFloat(chars) * u - gaps) / CGFloat(specials) : 0
         let specialWidth = max(minSpecial, leftover)
@@ -129,7 +149,7 @@ struct KeyboardView: View {
             : u
         return HStack(spacing: m.gap) {
             ForEach(Array(row.enumerated()), id: \.offset) { _, key in
-                KeyButton(key: key, model: model, width: isChar(key) ? charWidth : specialWidth, height: m.rowHeight)
+                KeyView(key: key, model: model, width: isChar(key) ? charWidth : specialWidth, height: m.rowHeight)
             }
         }
         .frame(width: width)
@@ -138,33 +158,72 @@ struct KeyboardView: View {
     private func bottomRow(width: CGFloat) -> some View {
         let small = m.smallKeyWidth
         return HStack(spacing: m.gap) {
-            KeyButton(key: model.page == .letters ? .numbers : .letters, model: model, width: small, height: m.rowHeight)
-            KeyButton(key: .emoji, model: model, width: small, height: m.rowHeight)
+            KeyView(key: model.page == .letters ? .numbers : .letters, model: model, width: small, height: m.rowHeight)
+            KeyView(key: .emoji, model: model, width: small, height: m.rowHeight)
             if model.hasLanguageKey {
-                KeyButton(key: .language, model: model, width: small, height: m.rowHeight)
+                KeyView(key: .language, model: model, width: small, height: m.rowHeight)
             }
             if model.showsGlobe {
-                KeyButton(key: .globe, model: model, width: small, height: m.rowHeight)
+                KeyView(key: .globe, model: model, width: small, height: m.rowHeight)
             }
-            KeyButton(key: .space, model: model, width: nil, height: m.rowHeight)
-            KeyButton(key: .ret, model: model, width: small * 2 + m.gap, height: m.rowHeight)
+            if model.page == .letters, model.bottomExtras.count == 2 {
+                KeyView(key: .char(model.bottomExtras[0]), model: model, width: small * 0.8, height: m.rowHeight)
+            }
+            KeyView(key: .space, model: model, width: nil, height: m.rowHeight)
+            if model.page == .letters, model.bottomExtras.count == 2 {
+                KeyView(key: .char(model.bottomExtras[1]), model: model, width: small * 0.8, height: m.rowHeight)
+            }
+            KeyView(key: .ret, model: model, width: small * 2 + m.gap, height: m.rowHeight)
         }
         .frame(width: width)
+    }
+
+    // MARK: Number pad (numberPad / decimalPad / phonePad fields)
+
+    private var numberPad: some View {
+        GeometryReader { geo in
+            let width = geo.size.width - m.sidePadding * 2
+            let keyW = (width - m.gap * 2) / 3
+            let extra: Key? = {
+                switch model.numberPadStyle {
+                case .decimal?: return .char(".")
+                case .phone?:   return .char("+")
+                default:        return nil
+                }
+            }()
+            VStack(spacing: m.rowGap) {
+                ForEach([["1","2","3"],["4","5","6"],["7","8","9"]], id: \.self) { row in
+                    HStack(spacing: m.gap) {
+                        ForEach(row, id: \.self) { d in
+                            KeyView(key: .char(d), model: model, width: keyW, height: m.rowHeight)
+                        }
+                    }
+                }
+                HStack(spacing: m.gap) {
+                    if let extra {
+                        KeyView(key: extra, model: model, width: keyW, height: m.rowHeight)
+                    } else {
+                        Color.clear.frame(width: keyW, height: m.rowHeight)
+                    }
+                    KeyView(key: .char("0"), model: model, width: keyW, height: m.rowHeight)
+                    KeyView(key: .backspace, model: model, width: keyW, height: m.rowHeight)
+                }
+            }
+            .frame(width: width)
+            .padding(.horizontal, m.sidePadding)
+        }
     }
 }
 
 // MARK: - Palette (sampled from the system keyboard)
 
 enum KeyboardPalette {
-    // Sampled from the system keyboard: iOS 27 dark (device photo) and
-    // iOS 26.4 light (simulator). Every key shares one colour; no shadows.
     static func background(_ s: ColorScheme) -> Color {
         s == .dark ? Color(hex: 0x212121) : Color(hex: 0xDFE0E6)
     }
     static func key(_ s: ColorScheme) -> Color {
         s == .dark ? Color(hex: 0x454545) : .white
     }
-    static func specialKey(_ s: ColorScheme) -> Color { key(s) }
     static func pressedKey(_ s: ColorScheme) -> Color {
         s == .dark ? Color(hex: 0x6B6B6B) : Color(hex: 0xC9CBD1)
     }
@@ -183,115 +242,60 @@ extension Color {
     }
 }
 
-// MARK: - Key button
+// MARK: - Key (visual only; touches handled by KeyTouchUIView)
 
-struct KeyButton: View {
+struct KeyView: View {
     let key: Key
     @ObservedObject var model: KeyboardModel
     let width: CGFloat?
     let height: CGFloat
     @Environment(\.colorScheme) private var scheme
-    @State private var pressed = false
-    @State private var frame: CGRect = .zero
-    @State private var pressID = 0
-    @State private var popupShown = false
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: KeyboardMetrics.keyCornerRadius, style: .continuous)
+            RoundedRectangle(cornerRadius: model.metrics.keyCornerRadius, style: .continuous)
                 .fill(fill)
             label
                 .foregroundStyle(labelColor)
+                .opacity(model.cursorMode && isCharOrSpace ? 0 : 1)
         }
         .frame(width: width, height: height)
         .frame(maxWidth: width == nil ? .infinity : nil)
         .background(GeometryReader { geo in
-            Color.clear.onAppear { frame = geo.frame(in: .named("keyboard")) }
-                .onChange(of: geo.size) { _, _ in frame = geo.frame(in: .named("keyboard")) }
+            Color.clear.preference(key: KeyFramesKey.self, value: [key: geo.frame(in: .named("keyboard"))])
         })
-        .contentShape(Rectangle())
-        .gesture(
-            DragGesture(minimumDistance: 0, coordinateSpace: .named("keyboard"))
-                .onChanged { value in
-                    if !pressed {
-                        pressed = true
-                        popupShown = false
-                        pressID += 1
-                        let id = pressID
-                        switch key {
-                        case .backspace:
-                            model.tap(.backspace)
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                                if pressed, pressID == id { model.startBackspaceRepeat() }
-                            }
-                        case .char(let glyph):
-                            if model.page != .emoji { model.showKeyPreview(glyph, keyFrame: frame) }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                                if pressed, pressID == id, model.showAlternates(for: glyph, keyFrame: frame) {
-                                    popupShown = true
-                                }
-                            }
-                        case .language:
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                                if pressed, pressID == id, model.showLanguages(keyFrame: frame) {
-                                    popupShown = true
-                                }
-                            }
-                        default:
-                            break
-                        }
-                    } else if popupShown, let popup = model.popup {
-                        let layout = KeyPopupView.layout(for: popup, keyHeight: height)
-                        model.updatePopupSelection(x: value.location.x,
-                                                   optionWidth: layout.optionWidth,
-                                                   popupMinX: layout.frame.minX)
-                    }
-                }
-                .onEnded { _ in
-                    pressed = false
-                    pressID += 1
-                    model.hideKeyPreview()
-                    if key == .backspace {
-                        model.stopBackspaceRepeat()
-                    } else if popupShown {
-                        popupShown = false
-                        model.commitPopup()
-                    } else {
-                        model.tap(key)
-                    }
-                }
-        )
+        .allowsHitTesting(false)
     }
 
-    private var isSpecial: Bool {
-        if case .char = key { return false }
-        if key == .space { return false }
-        return true
-    }
-
+    private var isChar: Bool { if case .char = key { return true } else { return false } }
+    private var isCharOrSpace: Bool { isChar || key == .space }
+    private var isSpecial: Bool { !isCharOrSpace }
+    private var pressed: Bool { model.pressedKeys.contains(key) }
     private var shiftActive: Bool { key == .shift && model.shift != .off }
+    private var returnBlue: Bool { key == .ret && model.returnKeyTinted && !model.translateMode }
 
     private var fill: Color {
-        if pressed { return KeyboardPalette.pressedKey(scheme) }
+        if returnBlue { return pressed ? Color.accentColor.opacity(0.7) : Color.accentColor }
+        // The system only pops up letters; special keys darken/lighten.
+        if pressed, isSpecial { return KeyboardPalette.pressedKey(scheme) }
+        if pressed, key == .space { return KeyboardPalette.pressedKey(scheme) }
         return KeyboardPalette.key(scheme)
     }
 
-    private var labelColor: Color { KeyboardPalette.text(scheme) }
+    private var labelColor: Color { returnBlue ? .white : KeyboardPalette.text(scheme) }
 
     @ViewBuilder
     private var label: some View {
         switch key {
         case .char(let s):
             Text(model.page == .letters && model.shift != .off ? s.uppercased() : s)
-                .font(.system(size: model.page == .letters ? 23 : 22, weight: .regular))
+                .font(.system(size: model.page == .letters ? model.metrics.letterFont : model.metrics.letterFont - 1))
         case .shift:
             Image(systemName: model.shift == .caps ? "capslock.fill" : (model.shift == .on ? "shift.fill" : "shift"))
-                .font(.system(size: 18, weight: .regular))
+                .font(.system(size: 18))
         case .backspace:
-            Image(systemName: "delete.left").font(.system(size: 18))
+            Image(systemName: pressed ? "delete.left.fill" : "delete.left").font(.system(size: 18))
         case .space:
-            // The system keyboard leaves the space key blank and tucks the
-            // language code into the bottom-right corner.
             ZStack(alignment: .bottomTrailing) {
                 Color.clear
                 Text(spaceCode)
@@ -306,18 +310,12 @@ struct KeyButton: View {
             } else {
                 Text(model.returnLabel).font(.system(size: 16))
             }
-        case .numbers:
-            Text("123").font(.system(size: 16))
-        case .letters:
-            Text("ABC").font(.system(size: 16))
-        case .symbols:
-            Text("#+=").font(.system(size: 16))
-        case .globe:
-            Image(systemName: "globe").font(.system(size: 18))
-        case .emoji:
-            SmileyIcon(disc: labelColor, face: fill)
-        case .language:
-            Text(model.currentLanguage.shortCode).font(.system(size: 15, weight: .medium))
+        case .numbers:  Text("123").font(.system(size: 16))
+        case .letters:  Text("ABC").font(.system(size: 16))
+        case .symbols:  Text("#+=").font(.system(size: 16))
+        case .globe:    Image(systemName: "globe").font(.system(size: 18))
+        case .emoji:    SmileyIcon(disc: labelColor, face: fill)
+        case .language: Text(model.currentLanguage.shortCode).font(.system(size: 15, weight: .medium))
         }
     }
 
@@ -338,7 +336,6 @@ struct TopBar: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // Direction chip
             HStack(spacing: 4) {
                 Text(model.direction.source.flag)
                 Image(systemName: "arrow.right").font(.system(size: 10, weight: .bold))
@@ -377,7 +374,6 @@ struct TopBar: View {
                 .buttonStyle(.plain)
             }
 
-            // Translate mode toggle. Filled = on.
             Button(action: model.toggleTranslateMode) {
                 HStack(spacing: 5) {
                     Image(systemName: "character.bubble")
@@ -498,7 +494,7 @@ struct ComposerStrip: View {
         }
         .padding(.horizontal, 10)
         .frame(maxWidth: .infinity)
-        .frame(height: KeyboardMetrics.composerHeight - 8)
+        .frame(height: model.metrics.composerHeight - 8)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(scheme == .dark ? Color(white: 0.22) : Color.white.opacity(0.9))
@@ -546,16 +542,16 @@ struct EmojiPanel: View {
             .id(model.emojiCategory)
 
             HStack(spacing: 4) {
-                KeyButton(key: .letters, model: model, width: 48, height: 36)
+                KeyView(key: .letters, model: model, width: 48, height: 36)
                 if !model.settings.recentEmoji.isEmpty {
                     tab("recent", symbol: "clock")
                 }
                 ForEach(EmojiData.categories) { cat in
                     tab(cat.id, symbol: cat.symbol)
                 }
-                KeyButton(key: .backspace, model: model, width: 48, height: 36)
+                KeyView(key: .backspace, model: model, width: 48, height: 36)
             }
-            .padding(.horizontal, KeyboardMetrics.sidePadding)
+            .padding(.horizontal, model.metrics.sidePadding)
         }
     }
 
@@ -592,8 +588,6 @@ struct KeyPopupView: View {
         let optionWidth: CGFloat
     }
 
-    /// Popup sits just above the pressed key, centred on it, clamped to the
-    /// screen. Shared with the key's drag tracking so both agree on geometry.
     static func layout(for popup: KeyPopup, keyHeight: CGFloat) -> Layout {
         let optionWidth = popup.kind == .languages ? 64 : max(popup.keyFrame.width, 34)
         let width = optionWidth * CGFloat(popup.options.count) + 8
@@ -631,9 +625,40 @@ struct KeyPopupView: View {
     }
 }
 
-/// Filled smiley like the system emoji key: a solid disc with the eyes and
-/// mouth knocked out in the key colour. Drawn by hand — SF's face.smiling
-/// variants render as an outline in this context.
+// MARK: - Character preview (magnified key)
+
+struct KeyPreviewView: View {
+    let glyph: String
+    let keyFrame: CGRect
+    let metrics: KeyboardMetrics
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let k = keyFrame
+        let width = max(k.width * 1.7, 46)
+        let height = k.height * 2.35
+        let screenWidth = UIScreen.main.bounds.width
+        var x = k.midX - width / 2
+        x = min(max(x, 2), screenWidth - width - 2)
+        let y = k.maxY - height
+        return ZStack(alignment: .top) {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(KeyboardPalette.key(scheme))
+                .shadow(color: .black.opacity(scheme == .dark ? 0.6 : 0.25), radius: 4, y: 1)
+            Text(glyph)
+                .font(.system(size: metrics.letterFont * 1.75, weight: .light))
+                .foregroundStyle(KeyboardPalette.text(scheme))
+                .frame(height: k.height * 1.35)
+        }
+        .frame(width: width, height: height)
+        .offset(x: x, y: y)
+        .allowsHitTesting(false)
+        .transition(.opacity)
+    }
+}
+
+// MARK: - Emoji key icon
+
 struct SmileyIcon: View {
     let disc: Color
     let face: Color
@@ -654,36 +679,5 @@ struct SmileyIcon: View {
             .stroke(face, style: StrokeStyle(lineWidth: size * 0.11, lineCap: .round))
         }
         .frame(width: size, height: size)
-    }
-}
-
-// MARK: - Character preview (magnified key)
-
-/// The system keyboard's key pop-up: the pressed key grows upward into a
-/// wider, taller rounded rectangle showing the glyph large.
-struct KeyPreviewView: View {
-    let preview: KeyPreview
-    @Environment(\.colorScheme) private var scheme
-
-    var body: some View {
-        let k = preview.keyFrame
-        let width = max(k.width * 1.7, 46)
-        let height = k.height * 2.35
-        let screenWidth = UIScreen.main.bounds.width
-        var x = k.midX - width / 2
-        x = min(max(x, 2), screenWidth - width - 2)
-        let y = k.maxY - height
-        return ZStack(alignment: .top) {
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(KeyboardPalette.key(scheme))
-                .shadow(color: .black.opacity(scheme == .dark ? 0.6 : 0.25), radius: 4, y: 1)
-            Text(preview.glyph)
-                .font(.system(size: 40, weight: .light))
-                .foregroundStyle(KeyboardPalette.text(scheme))
-                .frame(height: k.height * 1.35)
-        }
-        .frame(width: width, height: height)
-        .offset(x: x, y: y)
-        .allowsHitTesting(false)
     }
 }

@@ -14,7 +14,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardHost {
     private var heightConstraint: NSLayoutConstraint?
     private var cancellables: Set<AnyCancellable> = []
 
-    private var keyboardHeight: CGFloat { KeyboardMetrics.totalHeight(translateMode: model.translateMode) }
+    private var keyboardHeight: CGFloat { model.metrics.totalHeight(translateMode: model.translateMode) }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -38,9 +38,16 @@ final class KeyboardViewController: UIInputViewController, KeyboardHost {
         hc.didMove(toParent: self)
         hosting = hc
 
+        // The user's Text Replacement shortcuts (Settings → Keyboard).
+        requestSupplementaryLexicon { [weak self] lexicon in
+            var map: [String: String] = [:]
+            for e in lexicon.entries { map[e.userInput.lowercased()] = e.documentText }
+            DispatchQueue.main.async { self?.model.lexicon = map }
+        }
+
         // Translate mode adds the composer strip: grow/shrink the keyboard.
-        model.$translateMode
-            .removeDuplicates()
+        model.$translateMode.map { _ in () }
+            .merge(with: model.$metrics.removeDuplicates().map { _ in () })
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self, let h = self.heightConstraint else { return }
@@ -62,7 +69,20 @@ final class KeyboardViewController: UIInputViewController, KeyboardHost {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         applyAppearance()
+        updateMetrics()
         model.textDidChange()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateMetrics()
+    }
+
+    /// Portrait vs landscape presets, decided from the screen the keyboard is on.
+    private func updateMetrics() {
+        let b = view.window?.screen.bounds ?? UIScreen.main.bounds
+        let m = KeyboardMetrics.current(width: b.width, height: b.height)
+        if m != model.metrics { model.metrics = m }
     }
 
     override func textDidChange(_ textInput: UITextInput?) {

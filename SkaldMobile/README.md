@@ -28,8 +28,20 @@ App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
   auto-capitalisation at sentence start, system key clicks.
 - **System typing behaviours**: double space → ". " (consecutive presses after
   a word), space after punctuation on the 123/#+= page returns to letters,
-  magnified key pop-up while pressed, light haptic on every key (needs Full
-  Access), key click sound.
+  magnified key pop-up while pressed (follows the finger, lingers 100 ms),
+  light haptic on every key (needs Full Access), key click sound.
+- **Touch handling like the system** (`Keyboard/KeyTouchView.swift`, a UIKit
+  multi-touch layer over the SwiftUI keys): two-thumb typing, release on the
+  key under the finger, glide from shift/123 to a key (one capital / one digit
+  and back), long-press pop-ups, backspace repeat that switches to deleting
+  whole words after ~1.5 s, **space-bar trackpad** (hold space, drag to move
+  the cursor; letters hide like the system).
+- **Host field traits**: number pad for numberPad/decimalPad/phonePad
+  fields, `@`/`.` keys for e-mail, `.`/`/` for URLs, no corrections in
+  password/e-mail/URL fields or when the app turns autocorrection off,
+  autocapitalization mode (none/words/sentences/all) from the field, blue
+  Go/Search/Send/Done return key, user Text Replacement shortcuts via the
+  supplementary lexicon. Landscape gets its own metrics preset.
 - **Auto-correction & suggestions**: per-language frequency dictionaries
   (OpenSubtitles 2018 top-50k, `Keyboard/Resources/freq_*.txt`, CC-BY-SA) +
   edit-distance candidates weighted by key adjacency on the current layout,
