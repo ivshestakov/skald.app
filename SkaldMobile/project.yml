@@ -70,6 +70,7 @@ targets:
       properties:
         CFBundleDisplayName: Skald
         CFBundleName: SkaldKeyboard
+        ITSAppUsesNonExemptEncryption: false
         NSExtension:
           NSExtensionPointIdentifier: com.apple.keyboard-service
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
