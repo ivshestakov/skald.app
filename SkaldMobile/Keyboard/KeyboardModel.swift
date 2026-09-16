@@ -791,37 +791,12 @@ final class KeyboardModel: ObservableObject {
         return true
     }
 
-    /// Debounced live translation of the composer.
+    /// No live translation: typing only updates the field. Translation runs
+    /// when the user sends it with ↑ (see `commitComposer`).
     private func schedulePreview() {
         previewTask?.cancel()
-        let text = composer.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else {
-            preview = ""; previewFor = ""; previewBusy = false
-            return
-        }
+        preview = ""; previewFor = ""; previewBusy = false
         direction = translatePair
-        let engine = settings.engine
-        let pair = direction
-        previewTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 700_000_000)
-            guard let self, !Task.isCancelled else { return }
-            guard self.checkAccess(engine) else { return }
-            self.previewBusy = true
-            defer { if !Task.isCancelled { self.previewBusy = false } }
-            do {
-                let t = try await TranslationService.translate(text, engine: engine, pair: pair, settings: self.settings)
-                guard !Task.isCancelled else { return }
-                self.preview = t
-                self.previewFor = text
-                if case .error = self.status { self.status = .idle }
-            } catch is CancellationError {
-            } catch {
-                guard !Task.isCancelled else { return }
-                NSLog("Skald keyboard: preview error: %@", String(describing: error))
-                self.preview = ""
-                self.status = .error(TranslateFailure(error, engine: engine).keyboardLine)
-            }
-        }
     }
 
     /// Return / Insert in translate mode: put the translation into the

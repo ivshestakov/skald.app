@@ -341,7 +341,29 @@ struct TopBar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            // Target-language flag: tap = open the translation field.
+            Group {
+                if model.translateMode {
+                    TranslationField(model: model)
+                } else {
+                    statusView
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if model.undo != nil, !model.translateMode {
+                Button(action: model.undoTranslation) {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 32, height: 34)
+                        .background(
+                            RoundedRectangle(cornerRadius: model.metrics.keyCornerRadius, style: .continuous)
+                                .fill(KeyboardPalette.chip(scheme))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+
+            // Target-language flag: tap = open / close the translation field.
             Button(action: model.toggleTranslateMode) {
                 HStack(spacing: 3) {
                     Text(model.translatePair.target.flag).font(.system(size: 20))
@@ -361,7 +383,7 @@ struct TopBar: View {
             Button(action: model.toggleSettings) {
                 Image(systemName: model.showsTonePill ? model.settings.tone.symbolName : "slider.horizontal.3")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(model.showSettings ? Color.white : KeyboardPalette.text(scheme))
+                    .foregroundStyle(model.showSettings ? Color.white : (model.showsTonePill ? model.settings.tone.color : KeyboardPalette.text(scheme)))
                     .frame(width: 36, height: 34)
                     .background(
                         RoundedRectangle(cornerRadius: model.metrics.keyCornerRadius, style: .continuous)
@@ -369,28 +391,6 @@ struct TopBar: View {
                     )
             }
             .buttonStyle(.plain)
-
-            if model.undo != nil, !model.translateMode {
-                Button(action: model.undoTranslation) {
-                    Image(systemName: "arrow.uturn.backward")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 32, height: 34)
-                        .background(
-                            RoundedRectangle(cornerRadius: model.metrics.keyCornerRadius, style: .continuous)
-                                .fill(KeyboardPalette.chip(scheme))
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-
-            Group {
-                if model.translateMode {
-                    TranslationField(model: model)
-                } else {
-                    statusView
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .foregroundStyle(KeyboardPalette.text(scheme))
     }
@@ -442,31 +442,33 @@ struct TopBar: View {
 }
 
 /// The translation field that replaces the suggestion strip while the
-/// translate mode is on: your text on top, the live translation below.
+/// translate mode is on. Shows only what you type; the translation happens
+/// when you send it with ↑.
 struct TranslationField: View {
     @ObservedObject var model: KeyboardModel
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         HStack(spacing: 6) {
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 0) {
-                    Text(model.composer.isEmpty ? placeholder : model.composer)
-                        .font(.system(size: 14))
+            if case .busy = model.status {
+                ProgressView().controlSize(.small)
+            } else {
+                Text("\(model.translatePair.source.flag)→\(model.translatePair.target.flag)")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 0) {
+                if case .error(let text) = model.status {
+                    Text(text).font(.system(size: 12)).foregroundStyle(.orange).lineLimit(2).minimumScaleFactor(0.8)
+                } else {
+                    Text(model.composer.isEmpty ? "Type, then ↑ to translate" : model.composer)
+                        .font(.system(size: 16))
                         .foregroundStyle(model.composer.isEmpty ? .secondary : KeyboardPalette.text(scheme))
                         .lineLimit(1)
                         .truncationMode(.head)
                     if !model.composer.isEmpty {
-                        Rectangle().fill(Color.accentColor).frame(width: 2, height: 16)   // caret
+                        Rectangle().fill(Color.accentColor).frame(width: 2, height: 18)   // caret
                     }
-                }
-                HStack(spacing: 4) {
-                    if model.previewBusy { ProgressView().controlSize(.mini) }
-                    Text(previewLine)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(previewColor)
-                        .lineLimit(1)
-                        .truncationMode(.head)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -491,22 +493,6 @@ struct TranslationField: View {
             RoundedRectangle(cornerRadius: model.metrics.keyCornerRadius, style: .continuous)
                 .strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1)
         )
-    }
-
-    private var placeholder: String {
-        "\(model.translatePair.source.flag) → \(model.translatePair.target.flag)  type, then ↑"
-    }
-
-    private var previewLine: String {
-        if case .error(let text) = model.status { return text }
-        if model.composer.isEmpty { return "Empty + ↑ translates the text already in the field" }
-        if model.preview.isEmpty { return model.previewBusy ? "Translating…" : "…" }
-        return model.preview
-    }
-
-    private var previewColor: Color {
-        if case .error = model.status { return .orange }
-        return model.preview.isEmpty ? .secondary : Color.accentColor
     }
 }
 
@@ -538,22 +524,23 @@ struct TranslateSettingsPanel: View {
                     }
                 }
             }
-            row("Style") {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        chip("Off", selected: !model.settings.adaptStyleEnabled) { model.setAdaptStyle(false) }
-                        ForEach(tones) { t in
-                            chip(t.shortLabel, selected: model.settings.adaptStyleEnabled && model.settings.tone == t,
-                                 tint: t.color) { model.setTone(t) }
-                        }
-                    }
-                }
+            HStack(alignment: .center, spacing: 8) {
+                Text("Style")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 78, alignment: .leading)
+                ToneSliderView(model: model)
+                Toggle("", isOn: Binding(get: { model.settings.adaptStyleEnabled }, set: { model.setAdaptStyle($0) }))
+                    .labelsHidden()
+                    .tint(model.settings.tone.color)
             }
             .opacity(model.settings.engine == .claude ? 1 : 0.35)
             .disabled(model.settings.engine != .claude)
-            Text(model.settings.engine == .claude
-                 ? model.settings.tone.subtitle
-                 : "Style adaptation needs the Claude engine.")
+            Text(model.settings.engine != .claude
+                 ? "Style adaptation needs the Claude engine."
+                 : (model.settings.adaptStyleEnabled
+                    ? "\(model.settings.tone.displayName): \(model.settings.tone.subtitle)"
+                    : "Style off — the translation keeps your tone."))
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
@@ -763,5 +750,63 @@ struct SmileyIcon: View {
             .stroke(face, style: StrokeStyle(lineWidth: size * 0.11, lineCap: .round))
         }
         .frame(width: size, height: size)
+    }
+}
+
+// MARK: - Tone slider (icons above a gradient track, snaps to five stops)
+
+struct ToneSliderView: View {
+    @ObservedObject var model: KeyboardModel
+    @Environment(\.colorScheme) private var scheme
+    private let tones = Tone.allCases
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let step = w / CGFloat(tones.count - 1)
+            let sel = model.settings.adaptStyleEnabled ? model.settings.tone : .original
+            let x = CGFloat(sel.rawValue) * step
+            ZStack(alignment: .topLeading) {
+                // icons
+                ForEach(tones) { t in
+                    Image(systemName: t.symbolName)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(t == sel && model.settings.adaptStyleEnabled ? t.color : Color.secondary)
+                        .frame(width: 24, height: 18)
+                        .position(x: CGFloat(t.rawValue) * step, y: 9)
+                }
+                // track
+                Capsule()
+                    .fill(LinearGradient(colors: tones.map { $0.color }, startPoint: .leading, endPoint: .trailing))
+                    .frame(height: 6)
+                    .opacity(model.settings.adaptStyleEnabled ? 1 : 0.35)
+                    .position(x: w / 2, y: 32)
+                ForEach(tones) { t in
+                    Circle().fill(KeyboardPalette.background(scheme)).frame(width: 4, height: 4)
+                        .position(x: CGFloat(t.rawValue) * step, y: 32)
+                }
+                // thumb
+                Circle()
+                    .fill(.white)
+                    .overlay(Circle().fill(sel.color).frame(width: 10, height: 10))
+                    .shadow(color: .black.opacity(0.25), radius: 2, y: 1)
+                    .frame(width: 22, height: 22)
+                    .position(x: x, y: 32)
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { v in select(at: v.location.x, step: step) }
+                    .onEnded { v in select(at: v.location.x, step: step) }
+            )
+        }
+        .frame(height: 44)
+        .padding(.horizontal, 12)
+    }
+
+    private func select(at x: CGFloat, step: CGFloat) {
+        let i = min(max(Int((x / step).rounded()), 0), tones.count - 1)
+        let t = tones[i]
+        if !model.settings.adaptStyleEnabled || model.settings.tone != t { model.setTone(t) }
     }
 }

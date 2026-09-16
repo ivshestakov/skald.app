@@ -64,17 +64,17 @@ App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
 - **Emoji key**: in-keyboard emoji panel, 1 898 emoji in 9 categories plus
   Recents (generated from Unicode `emoji-test.txt`, `Keyboard/EmojiData.swift`).
 - **Top bar** = the system-style suggestion strip, with two translation
-  controls on the left:
+  controls on the right:
   - **Target-language flag** (source is always the current layout's
     language). Tap: the strip turns into the *translation field*; what you
-    type goes there, the live translation shows under it (debounced 0.7 s),
-    and the return key becomes a blue **↑**. ↑ inserts the translation into
-    the app and closes the field. **as is** inserts your original; with an
-    empty field ↑ translates the text already before the cursor in place.
+    type goes there (no live translation), and the return key becomes a
+    blue **↑**. ↑ translates the field and inserts the result into the app,
+    then closes the field. **as is** inserts your original; with an empty
+    field ↑ translates the text already before the cursor in place.
     **Undo** (appears after an insertion) takes it back and reopens the field.
   - **Style button**: a panel over the keys with *Translate to*, *Engine*
-    (Apple / Google / DeepL / Claude) and *Style* (Off + the five tones,
-    Claude only).
+    (Apple / Google / DeepL / Claude) and *Style*: five tone icons over a
+    gradient slider that snaps to them, plus an on/off switch (Claude only).
 - Direction in the translation field: current layout → "translate to"
   (or → primary when you're typing in the "translate to" language, or the
   language picked in the panel). In-place translation of existing text
