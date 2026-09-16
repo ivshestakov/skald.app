@@ -635,6 +635,9 @@ final class KeyboardModel: ObservableObject {
         repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
+                // Every repeated deletion clicks and taps like the system key.
+                self.host?.playClick()
+                if self.settings.hapticsEnabled { self.host?.playHaptic() }
                 self.backspaceCount += 1
                 if self.backspaceCount > 14 { self.deleteWordBackward() } else { self.backspaceOnce() }
             }
