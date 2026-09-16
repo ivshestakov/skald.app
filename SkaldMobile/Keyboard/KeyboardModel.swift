@@ -101,6 +101,10 @@ final class KeyboardModel: ObservableObject {
     private var previewTask: Task<Void, Never>?
 
     @Published var emojiCategory: String = ""
+    /// Texts sent for translation this session, newest first (max 5), for
+    /// swiping through them in the translation field.
+    private var sentHistory: [String] = []
+    private var historyCursor = -1
 
     private var shiftIsAuto = true
     private var lastShiftTap: Date = .distantPast
@@ -113,7 +117,8 @@ final class KeyboardModel: ObservableObject {
         let s = SkaldSettings.shared
         direction = LanguagePair(source: s.primaryLanguage, target: s.secondaryLanguage)
         emojiCategory = s.recentEmoji.isEmpty ? (EmojiData.categories.first?.id ?? "") : "recent"
-        Autocorrect.shared.preload(s.keyboardLanguages)
+        Autocorrect.shared.loadPersonal()
+        Autocorrect.shared.preload(s.keyboardLanguages.first ?? s.primaryLanguage)
     }
 
     // MARK: - Languages / layouts
@@ -124,11 +129,23 @@ final class KeyboardModel: ObservableObject {
         return langs[min(languageIndex, langs.count - 1)]
     }
     var currentLayout: LetterLayout { LetterLayout.forLanguage(currentLanguage) }
-    var hasLanguageKey: Bool { keyboardLanguages.count > 1 }
+    var hasLanguageKey: Bool { false }   // switching is a swipe on the space bar
     var showsGlobe: Bool { host?.needsInputModeSwitchKey ?? true }
 
     func nextLanguage() {
         languageIndex = (languageIndex + 1) % keyboardLanguages.count
+        Autocorrect.shared.preload(currentLanguage)
+    }
+
+    /// Swipe on the space bar: left = next layout, right = previous.
+    func swipeLanguage(_ delta: Int) {
+        let n = keyboardLanguages.count
+        guard n > 1 else { return }
+        languageIndex = ((languageIndex + delta) % n + n) % n
+        pressedKeys.remove(.space)
+        if settings.hapticsEnabled { host?.playHaptic() }
+        Autocorrect.shared.preload(currentLanguage)
+        direction = translatePair
     }
 
     var returnLabel: String {
@@ -279,6 +296,29 @@ final class KeyboardModel: ObservableObject {
         host?.proxy.adjustTextPosition(byCharacterOffset: n)
     }
 
+    /// Vertical trackpad movement: jump to the same column on the previous /
+    /// next line. Works on real line breaks; soft-wrapped lines are invisible
+    /// to a keyboard extension.
+    func moveCursorLines(_ delta: Int) {
+        guard let proxy = host?.proxy, delta != 0 else { return }
+        let before = proxy.documentContextBeforeInput ?? ""
+        let after = proxy.documentContextAfterInput ?? ""
+        let column = before.reversed().prefix { $0 != "\n" }.count
+        if delta < 0 {
+            guard let nl = before.lastIndex(of: "\n") else { proxy.adjustTextPosition(byCharacterOffset: -column); return }
+            let prevLine = before[..<nl]
+            let prevLen = prevLine.reversed().prefix { $0 != "\n" }.count
+            let target = min(column, prevLen)
+            proxy.adjustTextPosition(byCharacterOffset: -(column + 1 + (prevLen - target)))
+        } else {
+            guard let nl = after.firstIndex(of: "\n") else { proxy.adjustTextPosition(byCharacterOffset: after.count); return }
+            let restOfLine = after.distance(from: after.startIndex, to: nl)
+            let nextLine = after[after.index(after: nl)...]
+            let nextLen = nextLine.prefix { $0 != "\n" }.count
+            proxy.adjustTextPosition(byCharacterOffset: restOfLine + 1 + min(column, nextLen))
+        }
+    }
+
     func endCursorMode() {
         cursorMode = false
         textDidChange()
@@ -295,8 +335,7 @@ final class KeyboardModel: ObservableObject {
         lastInsertWasPunctuation = raw.count == 1 && Self.punctuation.contains(raw.first!)
         lastSpaceTap = .distantPast
         if lastInsertWasPunctuation { autocorrectCurrentWord(separator: s) }
-        if lastAutocorrect?.separator == s { return }   // autocorrect already inserted it
-        lastAutocorrect = nil
+        if lastAutocorrect?.separator == s { return }   // text replacement already inserted it
         insertRaw(s)
     }
 
@@ -339,6 +378,7 @@ final class KeyboardModel: ObservableObject {
     }
 
     private func replaceBeforeCaret(count: Int, with text: String) {
+        lastEditAt = Date()
         if translateMode {
             composer.removeLast(min(count, composer.count)); composer += text
             schedulePreview()
@@ -350,15 +390,17 @@ final class KeyboardModel: ObservableObject {
         }
     }
 
-    /// Called when a word is finished with `separator`. Replaces the word if
-    /// the spell checker has a confident fix; inserts the separator itself in
-    /// that case (so the caller must not).
+    /// Called when a word is finished with `separator`. Text replacements
+    /// apply at once; dictionary correction runs in the background and is
+    /// applied afterwards if the text still ends with that word — so typing
+    /// never waits. Returns true when it inserted the separator itself.
+    private var correctionGeneration = 0
+
     private func autocorrectCurrentWord(separator: String) {
         lastAutocorrect = nil
         guard page == .letters, !correctionsDisabled else { return }
         let word = currentWord
         guard !word.isEmpty else { return }
-        // Text replacements from Settings → Keyboard → Text Replacement win.
         if let rep = lexicon[word.lowercased()] {
             replaceBeforeCaret(count: word.count, with: rep + separator)
             lastAutocorrect = (word, rep, separator)
@@ -367,12 +409,30 @@ final class KeyboardModel: ObservableObject {
             return
         }
         guard settings.autocorrectEnabled else { return }
-        guard let fix = Autocorrect.shared.correction(for: word, prev: previousWord, language: currentLanguage, layout: currentLayout) else { return }
-        replaceBeforeCaret(count: word.count, with: fix.replacement + separator)
-        lastAutocorrect = (word, fix.replacement, separator)
-        remember(original: word, replacement: fix.replacement)
-        suggestions = []
-        textDidChange()
+        correctionGeneration += 1
+        let gen = correctionGeneration
+        let language = currentLanguage, layout = currentLayout, prev = previousWord
+        let inTranslateMode = translateMode
+        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            let fix = Autocorrect.shared.correction(for: word, prev: prev, language: language, layout: layout)
+            DispatchQueue.main.async {
+                guard let self, gen == self.correctionGeneration, self.translateMode == inTranslateMode else { return }
+                guard let fix else {
+                    if Autocorrect.shared.correctionWouldHaveConsidered(word, language: language) {
+                        Autocorrect.shared.noteUnknownKept(word)
+                    }
+                    return
+                }
+                // Still "word + separator" right before the caret?
+                let tail = word + separator
+                guard self.textBeforeCaret.hasSuffix(tail) else { return }
+                self.replaceBeforeCaret(count: tail.count, with: fix.replacement + separator)
+                self.lastAutocorrect = (word, fix.replacement, separator)
+                self.remember(original: word, replacement: fix.replacement)
+                self.suggestions = []
+                self.textDidChange()
+            }
+        }
     }
 
     /// Backspace right after an autocorrect puts the original word back.
@@ -382,6 +442,8 @@ final class KeyboardModel: ObservableObject {
         let before = textBeforeCaret
         guard before.hasSuffix(ac.replacement + ac.separator) else { return false }
         replaceBeforeCaret(count: ac.replacement.count + ac.separator.count, with: ac.original + ac.separator)
+        Autocorrect.shared.learnWord(ac.original)
+        correctionHistory.removeValue(forKey: ac.replacement.lowercased())
         textDidChange()
         return true
     }
@@ -403,11 +465,18 @@ final class KeyboardModel: ObservableObject {
         // when the caret was inside the word (system behaviour); otherwise do.
         let trailing = after.isEmpty && translateMode == false && (host?.proxy.documentContextAfterInput ?? "").first.map { !($0 == " ") } ?? true ? " " : ""
         replaceBeforeCaret(count: whole.count, with: text + trailing)
+        if s.hasPrefix("\"") || correctionHistory[whole.lowercased()]?.lowercased() == text.lowercased() {
+            Autocorrect.shared.learnWord(text)              // "keep what I typed"
+        } else {
+            Autocorrect.shared.learnFix(typed: correctionHistory[whole.lowercased()] ?? whole, fix: text)
+        }
         remember(original: whole, replacement: text)
         lastAutocorrect = nil
         lastSpaceTap = .distantPast
         textDidChange()
     }
+
+    private var suggestionGeneration = 0
 
     private func updateSuggestions() {
         guard settings.suggestionsEnabled, !correctionsDisabled, page == .letters, status == .idle || translateMode else {
@@ -416,27 +485,31 @@ final class KeyboardModel: ObservableObject {
         let before = currentWord
         let after = wordAfterCaret
         let word = before + after
-        var next: [String]
-        if word.isEmpty {
-            // After a space: predict the next word from the previous one.
-            let t = textBeforeCaret
-            if t.hasSuffix(" "), let prev = previousWordForPrediction(t) {
-                next = Autocorrect.shared.nextWords(after: prev, language: currentLanguage)
+        let t = textBeforeCaret
+        let prev = previousWord
+        let prevForPrediction = t.hasSuffix(" ") ? previousWordForPrediction(t) : nil
+        let history = correctionHistory[word.lowercased()]
+        let language = currentLanguage, layout = currentLayout
+        suggestionGeneration += 1
+        let gen = suggestionGeneration
+        DispatchQueue.global(qos: .userInteractive).async { [weak self] in
+            var next: [String]
+            if word.isEmpty {
+                next = prevForPrediction.map { Autocorrect.shared.nextWords(after: $0, language: language) } ?? []
             } else {
-                next = []
+                next = Autocorrect.shared.suggestions(forPartial: word, prev: prev, language: language,
+                                                      layout: layout, alwaysFixes: !after.isEmpty)
+                if let original = history, original.lowercased() != word.lowercased() {
+                    next.removeAll { $0 == original }
+                    next.insert(original, at: 0)
+                    if next.count > 3 { next.removeLast(next.count - 3) }
+                }
             }
-        } else {
-            let tapped = !after.isEmpty
-            next = Autocorrect.shared.suggestions(forPartial: word, prev: previousWord, language: currentLanguage,
-                                                  layout: currentLayout, alwaysFixes: tapped)
-            // The word was auto-corrected earlier: what the user typed goes first.
-            if let original = correctionHistory[word.lowercased()], original.lowercased() != word.lowercased() {
-                next.removeAll { $0 == original }
-                next.insert(original, at: 0)
-                if next.count > 3 { next.removeLast(next.count - 3) }
+            DispatchQueue.main.async {
+                guard let self, gen == self.suggestionGeneration else { return }
+                if next != self.suggestions { self.suggestions = next }
             }
         }
-        if next != suggestions { suggestions = next }
     }
 
     private func previousWordForPrediction(_ text: String) -> String? {
@@ -484,13 +557,14 @@ final class KeyboardModel: ObservableObject {
         lastInsertWasPunctuation = false
         lastSpaceTap = now
         autocorrectCurrentWord(separator: " ")
-        if lastAutocorrect != nil { return }
+        if lastAutocorrect != nil { return }             // text replacement inserted the space
         insertRaw(" ")
     }
 
     /// Inserts text where typing currently goes: the composer in translate
     /// mode, the document otherwise.
     private func insertRaw(_ s: String) {
+        lastEditAt = Date()
         if translateMode {
             composer += s
             schedulePreview()
@@ -509,6 +583,7 @@ final class KeyboardModel: ObservableObject {
     }
 
     private func backspaceOnce() {
+        lastEditAt = Date()
         if revertAutocorrectIfNeeded() { return }
         if translateMode, !composer.isEmpty {
             composer.removeLast()
@@ -594,7 +669,16 @@ final class KeyboardModel: ObservableObject {
         if tinted != returnKeyTinted { returnKeyTinted = tinted }
     }
 
-    func textDidChange() {
+    /// When we last edited the document ourselves. Right after a burst of
+    /// deletes + inserts (autocorrect) the host may briefly report an empty
+    /// context, which must not be mistaken for "start of text".
+    private var lastEditAt = Date.distantPast
+
+    /// `fromHost` = called from the system's textDidChange/selectionDidChange,
+    /// i.e. the document context is settled. Auto-capitalisation is decided
+    /// only then (or on the local composer), never on our own intermediate
+    /// state.
+    func textDidChange(fromHost: Bool = false) {
         guard let proxy = host?.proxy else { return }
         applyHostTraits()
         defer { updateSuggestions() }
@@ -605,7 +689,10 @@ final class KeyboardModel: ObservableObject {
             }
         } else {
             let before = proxy.documentContextBeforeInput ?? ""
-            updateAutoShift(before: before)
+            if fromHost {
+                let suspiciousEmpty = before.isEmpty && Date().timeIntervalSince(lastEditAt) < 0.5
+                if !suspiciousEmpty { updateAutoShift(before: before) }
+            }
             updateDirection(text: (proxy.selectedText?.isEmpty == false) ? proxy.selectedText! : before)
         }
     }
@@ -760,6 +847,7 @@ final class KeyboardModel: ObservableObject {
     func enterTranslateMode() {
         host?.playClick()
         translateMode = true
+        historyCursor = -1
         showSettings = false
         composer = ""; preview = ""; previewFor = ""; previewBusy = false
         if case .error = status { status = .idle }
@@ -774,6 +862,18 @@ final class KeyboardModel: ObservableObject {
         previewTask?.cancel()
         composer = ""; preview = ""; previewFor = ""; previewBusy = false
         if case .error = status { status = .idle }
+        textDidChange()
+    }
+
+    /// Swipe in the translation field: left = older sent text, right = newer.
+    func swipeHistory(_ delta: Int) {
+        guard translateMode, !sentHistory.isEmpty else { return }
+        let next = historyCursor + delta
+        if next < 0 { historyCursor = -1; composer = ""; return }
+        guard next < sentHistory.count else { return }
+        historyCursor = next
+        composer = sentHistory[next]
+        host?.playClick()
         textDidChange()
     }
 
@@ -835,7 +935,10 @@ final class KeyboardModel: ObservableObject {
     private func finishCommit(source: String, translated: String, trailing: String) {
         host?.proxy.insertText(translated + trailing)
         undo = UndoRecord(original: "", translated: translated + trailing, composerRestore: composer)
-        settings.recordHistory(source: source, target: translated, engine: settings.engine)
+        sentHistory.removeAll { $0 == source }
+        sentHistory.insert(source, at: 0)
+        if sentHistory.count > 5 { sentHistory.removeLast(sentHistory.count - 5) }
+        historyCursor = -1
         composer = ""; preview = ""; previewFor = ""; previewBusy = false
         status = .done
         translateMode = false           // the field collapses back to suggestions
@@ -897,7 +1000,6 @@ final class KeyboardModel: ObservableObject {
                 self.undo = UndoRecord(original: core + (usingSelection ? "" : trailing),
                                        translated: translated + (usingSelection ? "" : trailing))
                 self.status = .done
-                self.settings.recordHistory(source: core, target: translated, engine: engine)
                 self.textDidChange()
             } catch is CancellationError {
                 self.status = .idle

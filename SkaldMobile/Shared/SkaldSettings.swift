@@ -29,6 +29,8 @@ final class SkaldSettings: ObservableObject {
         static let haptics       = "skald.haptics"
         static let autocorrect   = "skald.autocorrect"
         static let suggestions   = "skald.suggestions"
+        static let learnedWords  = "skald.learnedWords"
+        static let learnedFixes  = "skald.learnedFixes"
     }
 
     private init() {
@@ -93,6 +95,16 @@ final class SkaldSettings: ObservableObject {
     var suggestionsEnabled: Bool {
         get { defaults.object(forKey: Key.suggestions) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.suggestions); objectWillChange.send() }
+    }
+
+    /// Personal autocorrect memory (see Autocorrect.learnWord / learnFix).
+    var learnedWords: [String: Int] {
+        get { defaults.dictionary(forKey: Key.learnedWords) as? [String: Int] ?? [:] }
+        set { defaults.set(newValue, forKey: Key.learnedWords) }
+    }
+    var learnedFixes: [String: String] {
+        get { defaults.dictionary(forKey: Key.learnedFixes) as? [String: String] ?? [:] }
+        set { defaults.set(newValue, forKey: Key.learnedFixes) }
     }
 
     static let recentEmojiLimit = 32

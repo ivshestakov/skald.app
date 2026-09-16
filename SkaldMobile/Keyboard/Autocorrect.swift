@@ -103,14 +103,75 @@ final class Autocorrect {
             d.loadBigrams(url: b)
         }
         dictionaries[language] = d
+        evictIfNeeded(keeping: language)
         return d
     }
 
-    /// Warm the cache off the main thread when the keyboard appears.
-    func preload(_ languages: [Language]) {
-        DispatchQueue.global(qos: .utility).async {
-            for l in languages { _ = self.dictionary(for: l) }
-        }
+    /// Warm the cache off the main thread when the keyboard appears. Only the
+    /// current layout's language: each loaded language costs ~10 MB and the
+    /// extension's memory budget is small.
+    func preload(_ language: Language) {
+        DispatchQueue.global(qos: .userInitiated).async { _ = self.dictionary(for: language) }
+    }
+
+    /// Drop other languages once more than two are resident.
+    private func evictIfNeeded(keeping language: Language) {
+        guard dictionaries.count > 2 else { return }
+        for k in dictionaries.keys where k != language { dictionaries.removeValue(forKey: k); break }
+    }
+
+    // MARK: Personal lexicon (learns from you)
+
+    /// Words you kept after Skald tried to change them, or typed repeatedly
+    /// while unknown: never auto-corrected again, offered in suggestions.
+    private(set) var personalWords: [String: Int] = [:]
+    /// Fixes you picked from the suggestion bar: typed (lowercased) → chosen.
+    private(set) var personalFixes: [String: String] = [:]
+    /// Unknown words typed once — the second time they graduate to personalWords.
+    private var seenUnknown: [String: Int] = [:]
+
+    private let settings = SkaldSettings.shared
+
+    func loadPersonal() {
+        personalWords = settings.learnedWords
+        personalFixes = settings.learnedFixes
+    }
+
+    /// The user rejected a correction (backspace revert, "keep as typed").
+    func learnWord(_ word: String) {
+        let w = word.lowercased()
+        guard w.count >= 2 else { return }
+        personalWords[w, default: 0] += 2
+        personalFixes.removeValue(forKey: w)
+        settings.learnedWords = personalWords
+        settings.learnedFixes = personalFixes
+    }
+
+    /// The user picked `fix` for `typed` from the bar.
+    func learnFix(typed: String, fix: String) {
+        let t = typed.lowercased(), f = fix.lowercased()
+        guard t != f, t.count >= 2 else { return }
+        personalFixes[t] = f
+        personalWords.removeValue(forKey: t)
+        settings.learnedFixes = personalFixes
+        settings.learnedWords = personalWords
+    }
+
+    /// An unknown word was left as typed (no correction applied). Twice → learned.
+    func noteUnknownKept(_ word: String) {
+        let w = word.lowercased()
+        seenUnknown[w, default: 0] += 1
+        if seenUnknown[w]! >= 2 { learnWord(w); seenUnknown.removeValue(forKey: w) }
+    }
+
+    private func isPersonal(_ lower: String) -> Bool { personalWords[lower] != nil }
+
+    /// True when `word` is unknown to every dictionary (so leaving it as typed
+    /// is a signal worth learning from).
+    func correctionWouldHaveConsidered(_ word: String, language: Language) -> Bool {
+        let lower = word.lowercased()
+        guard word.count >= 3, !isPersonal(lower), let dict = dictionary(for: language) else { return false }
+        return dict.freq[lower] == nil && !isKnownToSystem(word, language: language)
     }
 
     // MARK: System spell checker (validity only)
@@ -139,6 +200,10 @@ final class Autocorrect {
         guard word.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "’" || $0 == "-" }) else { return nil }
         if word == word.uppercased() { return nil }                         // acronyms
         let lower = word.lowercased()
+        if isPersonal(lower) { return nil }                                  // you told us to keep it
+        if let f = personalFixes[lower], dict.freq[f] != nil || isPersonal(f) {
+            return Correction(original: word, replacement: Self.matchCase(of: word, to: f))
+        }
         let known = dict.freq[lower] != nil
         if !known, isKnownToSystem(word, language: language) { return nil } // rarer but valid
         // Known and reasonably common: leave it. Known but rare, lowercase,
@@ -157,9 +222,10 @@ final class Autocorrect {
             consider(cand, weight: weight)
         }
         if best == nil, !known, lower.count >= 5 {
+            // Second edit restricted to neighbouring keys: ~10× fewer candidates.
             var seen = Set<String>()
             for (e1, w1) in Self.edits1(lower, alphabet: alphabet, adjacency: adjacency) {
-                for (e2, w2) in Self.edits1(e1, alphabet: alphabet, adjacency: adjacency) where !seen.contains(e2) {
+                for (e2, w2) in Self.edits1(e1, alphabet: alphabet, adjacency: adjacency, narrow: true) where !seen.contains(e2) {
                     seen.insert(e2)
                     consider(e2, weight: w1 * w2 * 0.05)
                 }
@@ -191,8 +257,9 @@ final class Autocorrect {
         guard word.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "’" || $0 == "-" }) else { return [] }
         let lower = word.lowercased()
         var out: [String] = []
-        let known = dict.freq[lower] != nil || isKnownToSystem(word, language: language)
+        let known = dict.freq[lower] != nil || isPersonal(lower) || isKnownToSystem(word, language: language)
         if !known, word.count >= 2 { out.append("\"\(word)\"") }
+        if let f = personalFixes[lower] { out.append(Self.matchCase(of: word, to: f)) }
 
         var scored: [(String, Double)] = []
         let s = dict.sorted
@@ -222,7 +289,8 @@ final class Autocorrect {
     // MARK: Edits
 
     /// Single-edit candidates with a plausibility weight (higher = likelier slip).
-    private static func edits1(_ w: String, alphabet: [Character], adjacency: [Character: Set<Character>]) -> [(String, Double)] {
+    private static func edits1(_ w: String, alphabet: [Character], adjacency: [Character: Set<Character>],
+                               narrow: Bool = false) -> [(String, Double)] {
         let chars = Array(w)
         var out: [(String, Double)] = []
         out.reserveCapacity(chars.count * (alphabet.count * 2 + 2))
@@ -235,7 +303,10 @@ final class Autocorrect {
             if i < chars.count - 1 {
                 var t = chars; t.swapAt(i, i + 1); out.append((String(t), 2.0))
             }
-            for c in alphabet {
+            let letters: [Character] = narrow
+                ? Array((i < chars.count ? adjacency[chars[i]] ?? [] : []).union(i > 0 ? adjacency[chars[i - 1]] ?? [] : []))
+                : alphabet
+            for c in letters {
                 // substitution — much likelier when the keys are neighbours
                 if i < chars.count, c != chars[i] {
                     var s = chars; s[i] = c

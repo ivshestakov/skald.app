@@ -6,8 +6,6 @@ struct RootView: View {
         TabView {
             SetupView()
                 .tabItem { Label("Setup", systemImage: "keyboard") }
-            PlaygroundView()
-                .tabItem { Label("Translate", systemImage: "character.bubble") }
             SettingsView()
                 .tabItem { Label("Settings", systemImage: "gearshape") }
         }

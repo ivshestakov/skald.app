@@ -69,7 +69,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardHost {
         super.viewWillAppear(animated)
         applyAppearance()
         updateMetrics()
-        model.textDidChange()
+        model.textDidChange(fromHost: true)
     }
 
     override func viewDidLayoutSubviews() {
@@ -87,14 +87,14 @@ final class KeyboardViewController: UIInputViewController, KeyboardHost {
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
         applyAppearance()
-        model.textDidChange()
+        model.textDidChange(fromHost: true)
     }
 
     /// The caret moved (user tapped into the text): refresh the word-at-caret
     /// suggestions.
     override func selectionDidChange(_ textInput: UITextInput?) {
         super.selectionDidChange(textInput)
-        model.textDidChange()
+        model.textDidChange(fromHost: true)
     }
 
     private func applyAppearance() {

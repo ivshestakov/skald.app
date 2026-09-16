@@ -39,7 +39,10 @@ final class KeyTouchUIView: UIView {
         var popupShown = false
         var cursorMode = false
         var cursorAccumulator: CGFloat = 0
-        init(startKey: Key, point: CGPoint) { self.startKey = startKey; self.currentKey = startKey; self.lastPoint = point }
+        var cursorAccumulatorY: CGFloat = 0
+        var swiped = false
+        let startPoint: CGPoint
+        init(startKey: Key, point: CGPoint) { self.startKey = startKey; self.currentKey = startKey; self.lastPoint = point; self.startPoint = point }
     }
 
     private var touches: [UITouch: TouchState] = [:]
@@ -118,12 +121,28 @@ final class KeyTouchUIView: UIView {
                 model.updatePopupSelection(x: p.x)
             } else if state.cursorMode {
                 state.cursorAccumulator += p.x - state.lastPoint.x
-                let step: CGFloat = 9
+                state.cursorAccumulatorY += p.y - state.lastPoint.y
+                let step: CGFloat = 9, stepY: CGFloat = 26
                 let n = Int(state.cursorAccumulator / step)
                 if n != 0 {
                     model.moveCursor(by: n)
                     state.cursorAccumulator -= CGFloat(n) * step
                 }
+                let m = Int(state.cursorAccumulatorY / stepY)
+                if m != 0 {
+                    model.moveCursorLines(m)
+                    state.cursorAccumulatorY -= CGFloat(m) * stepY
+                }
+            } else if state.startKey == .space, !state.swiped {
+                // Quick horizontal swipe on the space bar switches the layout.
+                let dx = p.x - state.startPoint.x
+                if abs(dx) > 36, abs(p.y - state.startPoint.y) < 30 {
+                    state.swiped = true
+                    state.longPressWork?.cancel()
+                    model.swipeLanguage(dx < 0 ? 1 : -1)
+                }
+            } else if state.swiped {
+                // ignore further movement
             } else {
                 let k = key(at: p)
                 if k != state.currentKey {
@@ -151,6 +170,8 @@ final class KeyTouchUIView: UIView {
                 model.keyReleased(state.startKey, releasedOn: nil, start: state.startKey)
             } else if state.cursorMode {
                 model.endCursorMode()
+                model.keyReleased(state.startKey, releasedOn: nil, start: state.startKey)
+            } else if state.swiped {
                 model.keyReleased(state.startKey, releasedOn: nil, start: state.startKey)
             } else {
                 model.keyReleased(state.startKey, releasedOn: state.currentKey, start: state.startKey)

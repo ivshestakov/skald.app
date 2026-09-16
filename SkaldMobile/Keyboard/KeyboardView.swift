@@ -442,8 +442,8 @@ struct TopBar: View {
 }
 
 /// The translation field that replaces the suggestion strip while the
-/// translate mode is on. Shows only what you type; the translation happens
-/// when you send it with ↑.
+/// translate mode is on. Only the text you type; ↑ translates and inserts.
+/// Swipe left/right to recall the last five texts you sent.
 struct TranslationField: View {
     @ObservedObject var model: KeyboardModel
     @Environment(\.colorScheme) private var scheme
@@ -452,36 +452,20 @@ struct TranslationField: View {
         HStack(spacing: 6) {
             if case .busy = model.status {
                 ProgressView().controlSize(.small)
-            } else {
-                Text("\(model.translatePair.source.flag)→\(model.translatePair.target.flag)")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
             }
             HStack(spacing: 0) {
                 if case .error(let text) = model.status {
                     Text(text).font(.system(size: 12)).foregroundStyle(.orange).lineLimit(2).minimumScaleFactor(0.8)
                 } else {
-                    Text(model.composer.isEmpty ? "Type, then ↑ to translate" : model.composer)
+                    Text(model.composer.isEmpty ? " " : model.composer)
                         .font(.system(size: 16))
-                        .foregroundStyle(model.composer.isEmpty ? .secondary : KeyboardPalette.text(scheme))
+                        .foregroundStyle(KeyboardPalette.text(scheme))
                         .lineLimit(1)
                         .truncationMode(.head)
-                    if !model.composer.isEmpty {
-                        Rectangle().fill(Color.accentColor).frame(width: 2, height: 18)   // caret
-                    }
+                    Rectangle().fill(Color.accentColor).frame(width: 2, height: 18)   // caret
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            if !model.composer.isEmpty {
-                Button(action: model.insertComposerAsIs) {
-                    Text("as is")
-                        .font(.system(size: 11, weight: .semibold))
-                        .padding(.horizontal, 7)
-                        .frame(height: 24)
-                        .background(KeyboardPalette.chip(scheme), in: Capsule())
-                }
-                .buttonStyle(.plain)
-            }
         }
         .padding(.horizontal, 8)
         .frame(height: 38)
@@ -492,6 +476,14 @@ struct TranslationField: View {
         .overlay(
             RoundedRectangle(cornerRadius: model.metrics.keyCornerRadius, style: .continuous)
                 .strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 25)
+                .onEnded { v in
+                    guard abs(v.translation.width) > abs(v.translation.height) else { return }
+                    model.swipeHistory(v.translation.width < 0 ? 1 : -1)
+                }
         )
     }
 }

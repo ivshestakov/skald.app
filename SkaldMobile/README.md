@@ -8,7 +8,7 @@ Two targets, one shared code folder:
 ```
 SkaldMobile/
 ├── project.yml        — xcodegen spec (the .xcodeproj is generated, not committed)
-├── App/               — container app (SwiftUI): Setup / Translate / Settings tabs
+├── App/               — container app (SwiftUI): Setup (with a try-it field) / Settings
 ├── Keyboard/          — SkaldKeyboard.appex (UIInputViewController + SwiftUI)
 └── Shared/            — compiled into both targets:
     ├── Language.swift, Engine.swift, Tone.swift   — same enums as the Mac app
@@ -35,7 +35,8 @@ App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
   key under the finger, glide from shift/123 to a key (one capital / one digit
   and back), long-press pop-ups, backspace repeat that switches to deleting
   whole words after ~1.5 s, **space-bar trackpad** (hold space, drag to move
-  the cursor; letters hide like the system).
+  the cursor horizontally and, across real line breaks, vertically; letters
+  hide like the system).
 - **Host field traits**: number pad for numberPad/decimalPad/phonePad
   fields, `@`/`.` keys for e-mail, `.`/`/` for URLs, no corrections in
   password/e-mail/URL fields or when the app turns autocorrection off,
@@ -51,27 +52,36 @@ App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
   validity check. Candidates are scored by 0.75·P(word|previous) +
   0.25·P(word), so context decides ("превет мир" → "привет"). Rare real
   words are only overridden when context makes the fix ≥40× likelier.
-  Correction happens on space/punctuation; backspace right after reverts it.
+  Correction runs **in the background** on space/punctuation (typing never
+  waits) and is applied only if the word is still right before the caret;
+  backspace right after reverts it. **It learns**: a reverted correction or
+  a "keep as typed" pick adds the word to your personal lexicon (never
+  corrected again, offered in suggestions), a fix you pick from the bar is
+  remembered for that typo, and an unknown word you keep twice becomes
+  yours. Personal data lives in the App Group defaults.
   Top bar: while typing — the typed word (quoted if unknown) and the best
   fixes/completions; after a space — the three likeliest next words;
   **tap into a word** — alternatives for that word, and if Skald had
   auto-corrected it, what you originally typed comes first. Text
   Replacement shortcuts from iOS Settings apply too. Toggles in Settings →
-  Typing.
-- **Language key** (`RU` / `UK` / `EN`…): cycles through the layouts chosen
-  under Settings → Keyboard layouts; long-press shows a picker. The idea is
-  to keep only the English system keyboard and let Skald cover the rest.
+  Typing. Only the current layout's dictionary is kept in memory (~10 MB);
+  the three shipped languages take 12 MB of the bundle.
+- **Layout switching = swipe on the space bar** (left: next, right:
+  previous) through the layouts chosen under Settings → Keyboard layouts.
+  The space key shows the current one (`ру`, `ук`, `en`). The idea is to keep
+  only the English system keyboard and let Skald cover the rest.
 - **Emoji key**: in-keyboard emoji panel, 1 898 emoji in 9 categories plus
   Recents (generated from Unicode `emoji-test.txt`, `Keyboard/EmojiData.swift`).
 - **Top bar** = the system-style suggestion strip, with two translation
   controls on the right:
   - **Target-language flag** (source is always the current layout's
-    language). Tap: the strip turns into the *translation field*; what you
-    type goes there (no live translation), and the return key becomes a
-    blue **↑**. ↑ translates the field and inserts the result into the app,
-    then closes the field. **as is** inserts your original; with an empty
-    field ↑ translates the text already before the cursor in place.
-    **Undo** (appears after an insertion) takes it back and reopens the field.
+    language). Tap: the strip turns into the *translation field* — plain
+    text only, what you type goes there — and the return key becomes a blue
+    **↑**. ↑ translates the field and inserts the result into the app, then
+    closes the field. With an empty field ↑ translates the text already
+    before the cursor in place. Swipe left/right in the field to recall the
+    last five texts you sent this session. **Undo** (after an insertion)
+    takes it back and reopens the field.
   - **Style button**: a panel over the keys with *Translate to*, *Engine*
     (Apple / Google / DeepL / Claude) and *Style*: five tone icons over a
     gradient slider that snaps to them, plus an on/off switch (Claude only).

@@ -5,6 +5,7 @@ struct SetupView: View {
     @EnvironmentObject private var settings: SkaldSettings
     @Environment(\.scenePhase) private var scenePhase
     @State private var enabled = KeyboardStatus.isEnabled
+    @State private var tryText = ""
 
     var body: some View {
         NavigationStack {
@@ -42,8 +43,13 @@ struct SetupView: View {
 
                 Section("How it works") {
                     step("⌨️", "Type your message with the Skald keyboard in any app — it has \(settings.primaryLanguage.displayName) and \(settings.secondaryLanguage.displayName) layouts.")
-                    step("🌐", "Tap **Translate**. Skald detects the language, translates into the other one, and replaces the text in place.")
+                    step("🏳️", "Tap the **flag** at the top right, type, then hit the blue **↑**: the translation goes into the app. Swipe the space bar to switch layouts.")
                     step("↩️", "Not happy? **Undo** brings your original back.")
+                }
+
+                Section("Try it") {
+                    TextField("Switch to Skald with 🌐 and type here", text: $tryText, axis: .vertical)
+                        .lineLimit(2...5)
                 }
 
                 Section {
