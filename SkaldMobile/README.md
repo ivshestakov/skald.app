@@ -42,14 +42,21 @@ App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
   autocapitalization mode (none/words/sentences/all) from the field, blue
   Go/Search/Send/Done return key, user Text Replacement shortcuts via the
   supplementary lexicon. Landscape gets its own metrics preset.
-- **Auto-correction & suggestions**: per-language frequency dictionaries
-  (OpenSubtitles 2018 top-50k, `Keyboard/Resources/freq_*.txt`, CC-BY-SA) +
-  edit-distance candidates weighted by key adjacency on the current layout,
-  with the system `UITextChecker` as a validity check so rare real words are
-  left alone. Correction happens on space/punctuation; backspace right after
-  reverts it. The top bar shows the typed word (quoted) and up to two
-  fixes/completions while typing. Not the system's language model — no
-  context — but it handles the common one-word typo. Toggles in Settings →
+- **Auto-correction & suggestions** (`Keyboard/Autocorrect.swift`):
+  per-language frequency dictionaries (OpenSubtitles 2018 top-50k,
+  `Keyboard/Resources/freq_*.txt`, CC-BY-SA) plus a **bigram model** built
+  from the OpenSubtitles corpus (`bigrams_*.bin`, 300k pairs per language,
+  built with `scratchpad/bigrams.py`), edit-distance candidates weighted by
+  key adjacency on the current layout, and the system `UITextChecker` as a
+  validity check. Candidates are scored by 0.75·P(word|previous) +
+  0.25·P(word), so context decides ("превет мир" → "привет"). Rare real
+  words are only overridden when context makes the fix ≥40× likelier.
+  Correction happens on space/punctuation; backspace right after reverts it.
+  Top bar: while typing — the typed word (quoted if unknown) and the best
+  fixes/completions; after a space — the three likeliest next words;
+  **tap into a word** — alternatives for that word, and if Skald had
+  auto-corrected it, what you originally typed comes first. Text
+  Replacement shortcuts from iOS Settings apply too. Toggles in Settings →
   Typing.
 - **Language key** (`RU` / `UK` / `EN`…): cycles through the layouts chosen
   under Settings → Keyboard layouts; long-press shows a picker. The idea is

@@ -91,6 +91,13 @@ final class KeyboardViewController: UIInputViewController, KeyboardHost {
         model.textDidChange()
     }
 
+    /// The caret moved (user tapped into the text): refresh the word-at-caret
+    /// suggestions.
+    override func selectionDidChange(_ textInput: UITextInput?) {
+        super.selectionDidChange(textInput)
+        model.textDidChange()
+    }
+
     private func applyAppearance() {
         // Respect the host field's requested keyboard appearance.
         switch textDocumentProxy.keyboardAppearance {

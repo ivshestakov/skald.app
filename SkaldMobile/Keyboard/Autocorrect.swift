@@ -22,9 +22,61 @@ final class Autocorrect {
     private final class Dictionary {
         let freq: [String: Int]
         let sorted: [String]          // for prefix completions
-        init(freq: [String: Int]) {
+        let words: [String]           // id → word (file order, shared with the bigram file)
+        let ids: [String: Int]
+        let total: Double
+        // Bigrams: (prevId << 32 | wordId) → count, plus per-prev totals and
+        // a per-prev list of followers for next-word prediction.
+        var bigrams: [UInt64: UInt32] = [:]
+        var prevTotals: [UInt32] = []
+        var followers: [Int32: [(Int32, UInt32)]] = [:]
+
+        init(words: [String], freq: [String: Int]) {
+            self.words = words
             self.freq = freq
             self.sorted = freq.keys.sorted()
+            var ids: [String: Int] = [:]; ids.reserveCapacity(words.count)
+            for (i, w) in words.enumerated() { ids[w] = i }
+            self.ids = ids
+            self.total = Double(freq.values.reduce(0, +))
+        }
+
+        func loadBigrams(url: URL) {
+            guard let data = try? Data(contentsOf: url), data.count > 12,
+                  data[0] == 0x53, data[1] == 0x4B, data[2] == 0x42, data[3] == 0x47 else { return }
+            func u32(_ o: Int) -> UInt32 {
+                UInt32(data[o]) | UInt32(data[o+1]) << 8 | UInt32(data[o+2]) << 16 | UInt32(data[o+3]) << 24
+            }
+            let v = Int(u32(4)), n = Int(u32(8))
+            guard v == words.count, data.count >= 12 + v * 4 + n * 12 else { return }
+            prevTotals = (0..<v).map { u32(12 + $0 * 4) }
+            var b: [UInt64: UInt32] = [:]; b.reserveCapacity(n)
+            var f: [Int32: [(Int32, UInt32)]] = [:]
+            var o = 12 + v * 4
+            for _ in 0..<n {
+                let p = u32(o), w = u32(o + 4), c = u32(o + 8); o += 12
+                b[UInt64(p) << 32 | UInt64(w)] = c
+                if f[Int32(p), default: []].count < 12 { f[Int32(p), default: []].append((Int32(w), c)) }  // file is sorted by count
+            }
+            bigrams = b; followers = f
+        }
+
+        func pUni(_ w: String) -> Double { Double(freq[w] ?? 0) / total }
+
+        /// Interpolated probability of `w` given the previous word (or just
+        /// its unigram probability when there is no usable context).
+        func p(_ w: String, after prev: String?) -> Double {
+            let uni = pUni(w)
+            guard let prev, let pi = ids[prev.lowercased()], let wi = ids[w], pi < prevTotals.count,
+                  prevTotals[pi] >= 20 else { return uni }
+            let c = Double(bigrams[UInt64(pi) << 32 | UInt64(wi)] ?? 0)
+            let bi = c / Double(prevTotals[pi])
+            return 0.75 * bi + 0.25 * uni
+        }
+
+        func nextWords(after prev: String, limit: Int) -> [String] {
+            guard let pi = ids[prev.lowercased()], let list = followers[Int32(pi)] else { return [] }
+            return list.prefix(limit).map { words[Int($0.0)] }
         }
     }
 
@@ -38,12 +90,18 @@ final class Autocorrect {
         guard let url = Bundle.main.url(forResource: "freq_\(language.rawValue)", withExtension: "txt"),
               let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         var freq: [String: Int] = [:]
-        freq.reserveCapacity(50_000)
+        var words: [String] = []
+        freq.reserveCapacity(50_000); words.reserveCapacity(50_000)
         for line in text.split(separator: "\n") {
             let parts = line.split(separator: " ", maxSplits: 1)
-            if parts.count == 2, let c = Int(parts[1]) { freq[String(parts[0])] = c }
+            if parts.count == 2, let c = Int(parts[1]) {
+                let w = String(parts[0]); freq[w] = c; words.append(w)
+            }
         }
-        let d = Dictionary(freq: freq)
+        let d = Dictionary(words: words, freq: freq)
+        if let b = Bundle.main.url(forResource: "bigrams_\(language.rawValue)", withExtension: "bin") {
+            d.loadBigrams(url: b)
+        }
         dictionaries[language] = d
         return d
     }
@@ -75,43 +133,60 @@ final class Autocorrect {
     // MARK: Correction
 
     /// Best correction for a finished word, or nil to leave it alone.
-    func correction(for word: String, language: Language, layout: LetterLayout) -> Correction? {
+    /// `prev` is the word before it (context for the bigram model).
+    func correction(for word: String, prev: String?, language: Language, layout: LetterLayout) -> Correction? {
         guard word.count >= 3, let dict = dictionary(for: language) else { return nil }
         guard word.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "’" || $0 == "-" }) else { return nil }
         if word == word.uppercased() { return nil }                         // acronyms
         let lower = word.lowercased()
-        if dict.freq[lower] != nil { return nil }                           // a real word
-        if isKnownToSystem(word, language: language) { return nil }        // rarer but valid
+        let known = dict.freq[lower] != nil
+        if !known, isKnownToSystem(word, language: language) { return nil } // rarer but valid
+        // Known and reasonably common: leave it. Known but rare, lowercase,
+        // ≥4 letters: still a candidate for a context fix ("тепер" → "теперь").
+        if known, (dict.freq[lower]! >= 300 || word.first!.isUppercase || word.count < 4) { return nil }
 
         let adjacency = Self.adjacency(for: layout)
+        let alphabet = Self.alphabet(for: layout)
         var best: (word: String, score: Double)?
         func consider(_ cand: String, weight: Double) {
-            guard let f = dict.freq[cand] else { return }
-            let s = Double(f) * weight
+            guard dict.freq[cand] != nil else { return }
+            let s = dict.p(cand, after: prev) * weight
             if best == nil || s > best!.score { best = (cand, s) }
         }
-        for (cand, weight) in Self.edits1(lower, alphabet: Self.alphabet(for: layout), adjacency: adjacency) {
+        for (cand, weight) in Self.edits1(lower, alphabet: alphabet, adjacency: adjacency) {
             consider(cand, weight: weight)
         }
-        if best == nil, lower.count >= 5 {
-            // Two edits: only via candidates that are themselves plausible.
+        if best == nil, !known, lower.count >= 5 {
             var seen = Set<String>()
-            for (e1, w1) in Self.edits1(lower, alphabet: Self.alphabet(for: layout), adjacency: adjacency) {
-                for (e2, w2) in Self.edits1(e1, alphabet: Self.alphabet(for: layout), adjacency: adjacency) where !seen.contains(e2) {
+            for (e1, w1) in Self.edits1(lower, alphabet: alphabet, adjacency: adjacency) {
+                for (e2, w2) in Self.edits1(e1, alphabet: alphabet, adjacency: adjacency) where !seen.contains(e2) {
                     seen.insert(e2)
                     consider(e2, weight: w1 * w2 * 0.05)
                 }
             }
         }
         guard let b = best, b.word != lower else { return nil }
-        // Don't "fix" into something obscure.
-        guard let f = dict.freq[b.word], f >= 30 else { return nil }
+        guard let f = dict.freq[b.word], f >= 30 else { return nil }         // nothing obscure
+        if known {
+            // Only override a real word when context makes the fix far likelier.
+            guard b.score > dict.p(lower, after: prev) * 40 else { return nil }
+        }
         return Correction(original: word, replacement: Self.matchCase(of: word, to: b.word))
     }
 
-    /// Suggestions for the word being typed: the word itself (quoted) when
-    /// it isn't known, then the likeliest fixes/completions by frequency.
-    func suggestions(forPartial word: String, language: Language, layout: LetterLayout, limit: Int = 3) -> [String] {
+    /// Likely next words after `prev` (for the suggestion bar when the caret
+    /// sits after a space).
+    func nextWords(after prev: String, language: Language, limit: Int = 3) -> [String] {
+        guard let dict = dictionary(for: language) else { return [] }
+        return dict.nextWords(after: prev, limit: limit)
+    }
+
+    /// Suggestions for the word at the caret: the word itself (quoted) when it
+    /// isn't known, then the likeliest fixes/completions by context-aware
+    /// probability. `alwaysFixes` also offers alternatives for known words
+    /// (tap-on-word).
+    func suggestions(forPartial word: String, prev: String?, language: Language, layout: LetterLayout,
+                     alwaysFixes: Bool = false, limit: Int = 3) -> [String] {
         guard !word.isEmpty, let dict = dictionary(for: language) else { return [] }
         guard word.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "’" || $0 == "-" }) else { return [] }
         let lower = word.lowercased()
@@ -120,20 +195,20 @@ final class Autocorrect {
         if !known, word.count >= 2 { out.append("\"\(word)\"") }
 
         var scored: [(String, Double)] = []
-        // completions
         let s = dict.sorted
         var lo = 0, hi = s.count
         while lo < hi { let m = (lo + hi) / 2; if s[m] < lower { lo = m + 1 } else { hi = m } }
         var i = lo
         while i < s.count, s[i].hasPrefix(lower), scored.count < 400 {
-            if s[i] != lower { scored.append((s[i], Double(dict.freq[s[i]] ?? 0) * (s[i].count <= lower.count + 4 ? 1 : 0.3))) }
+            if s[i] != lower {
+                scored.append((s[i], dict.p(s[i], after: prev) * (s[i].count <= lower.count + 4 ? 1 : 0.3)))
+            }
             i += 1
         }
-        // fixes
-        if !known, word.count >= 3 {
+        if (!known || alwaysFixes), word.count >= 3 {
             let adjacency = Self.adjacency(for: layout)
             for (cand, w) in Self.edits1(lower, alphabet: Self.alphabet(for: layout), adjacency: adjacency) {
-                if let f = dict.freq[cand] { scored.append((cand, Double(f) * w * 2)) }
+                if dict.freq[cand] != nil, cand != lower { scored.append((cand, dict.p(cand, after: prev) * w * 2)) }
             }
         }
         var seen = Set<String>()

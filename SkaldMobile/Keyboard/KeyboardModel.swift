@@ -67,6 +67,9 @@ final class KeyboardModel: ObservableObject {
     private var correctionsDisabled = false
     /// User's Settings → Keyboard → Text Replacement shortcuts.
     var lexicon: [String: String] = [:]
+    /// Words this session auto-corrected: replacement (lowercased) → what was typed.
+    private var correctionHistory: [String: String] = [:]
+    private var correctionOrder: [String] = []
     /// Set right after an automatic correction; backspace reverts it.
     private var lastAutocorrect: (original: String, replacement: String, separator: String)?
 
@@ -286,9 +289,35 @@ final class KeyboardModel: ObservableObject {
         translateMode ? composer : (host?.proxy.documentContextBeforeInput ?? "")
     }
 
+    private static func isWordChar(_ c: Character) -> Bool { c.isLetter || c == "'" || c == "’" || c == "-" }
+
     /// The word the caret is in (letters only), or "" at a word boundary.
     private var currentWord: String {
-        String(textBeforeCaret.reversed().prefix { $0.isLetter || $0 == "'" || $0 == "’" || $0 == "-" }.reversed())
+        String(textBeforeCaret.reversed().prefix(while: Self.isWordChar).reversed())
+    }
+
+    /// Rest of the word after the caret (when the user tapped inside a word).
+    private var wordAfterCaret: String {
+        guard !translateMode, let after = host?.proxy.documentContextAfterInput else { return "" }
+        return String(after.prefix(while: Self.isWordChar))
+    }
+
+    /// The word before the current one — context for the bigram model.
+    private var previousWord: String? {
+        var t = Substring(textBeforeCaret)
+        while let l = t.last, Self.isWordChar(l) { t = t.dropLast() }
+        while let l = t.last, l == " " { t = t.dropLast() }
+        guard let l = t.last, Self.isWordChar(l) else { return nil }
+        var w = ""
+        while let c = t.last, Self.isWordChar(c) { w.insert(c, at: w.startIndex); t = t.dropLast() }
+        return w
+    }
+
+    private func remember(original: String, replacement: String) {
+        let key = replacement.lowercased()
+        if correctionHistory[key] == nil { correctionOrder.append(key) }
+        correctionHistory[key] = original
+        if correctionOrder.count > 60 { correctionHistory.removeValue(forKey: correctionOrder.removeFirst()) }
     }
 
     private func replaceBeforeCaret(count: Int, with text: String) {
@@ -320,9 +349,10 @@ final class KeyboardModel: ObservableObject {
             return
         }
         guard settings.autocorrectEnabled else { return }
-        guard let fix = Autocorrect.shared.correction(for: word, language: currentLanguage, layout: currentLayout) else { return }
+        guard let fix = Autocorrect.shared.correction(for: word, prev: previousWord, language: currentLanguage, layout: currentLayout) else { return }
         replaceBeforeCaret(count: word.count, with: fix.replacement + separator)
         lastAutocorrect = (word, fix.replacement, separator)
+        remember(original: word, replacement: fix.replacement)
         suggestions = []
         textDidChange()
     }
@@ -338,24 +368,66 @@ final class KeyboardModel: ObservableObject {
         return true
     }
 
-    /// Tap on a suggestion in the top bar: replace the current word.
+    /// Tap on a suggestion in the top bar: replace the word at the caret
+    /// (both halves, when the caret is inside it).
     func acceptSuggestion(_ s: String) {
         host?.playClick()
         if settings.hapticsEnabled { host?.playHaptic() }
-        let word = currentWord
+        let before = currentWord
+        let after = wordAfterCaret
         var text = s
         if text.hasPrefix("\""), text.hasSuffix("\"") { text = String(text.dropFirst().dropLast()) }   // keep as typed
-        replaceBeforeCaret(count: word.count, with: text + " ")
+        if !after.isEmpty, let proxy = host?.proxy {
+            proxy.adjustTextPosition(byCharacterOffset: after.count)
+        }
+        let whole = before + after
+        // Replacing an auto-corrected word with the original: don't append a space
+        // when the caret was inside the word (system behaviour); otherwise do.
+        let trailing = after.isEmpty && translateMode == false && (host?.proxy.documentContextAfterInput ?? "").first.map { !($0 == " ") } ?? true ? " " : ""
+        replaceBeforeCaret(count: whole.count, with: text + trailing)
+        remember(original: whole, replacement: text)
         lastAutocorrect = nil
         lastSpaceTap = .distantPast
         textDidChange()
     }
 
     private func updateSuggestions() {
-        guard settings.suggestionsEnabled, !correctionsDisabled, page == .letters, status == .idle || translateMode else { suggestions = []; return }
-        let word = currentWord
-        let next = word.isEmpty ? [] : Autocorrect.shared.suggestions(forPartial: word, language: currentLanguage, layout: currentLayout)
+        guard settings.suggestionsEnabled, !correctionsDisabled, page == .letters, status == .idle || translateMode else {
+            suggestions = []; return
+        }
+        let before = currentWord
+        let after = wordAfterCaret
+        let word = before + after
+        var next: [String]
+        if word.isEmpty {
+            // After a space: predict the next word from the previous one.
+            let t = textBeforeCaret
+            if t.hasSuffix(" "), let prev = previousWordForPrediction(t) {
+                next = Autocorrect.shared.nextWords(after: prev, language: currentLanguage)
+            } else {
+                next = []
+            }
+        } else {
+            let tapped = !after.isEmpty
+            next = Autocorrect.shared.suggestions(forPartial: word, prev: previousWord, language: currentLanguage,
+                                                  layout: currentLayout, alwaysFixes: tapped)
+            // The word was auto-corrected earlier: what the user typed goes first.
+            if let original = correctionHistory[word.lowercased()], original.lowercased() != word.lowercased() {
+                next.removeAll { $0 == original }
+                next.insert(original, at: 0)
+                if next.count > 3 { next.removeLast(next.count - 3) }
+            }
+        }
         if next != suggestions { suggestions = next }
+    }
+
+    private func previousWordForPrediction(_ text: String) -> String? {
+        var t = Substring(text)
+        while let l = t.last, l == " " { t = t.dropLast() }
+        guard let l = t.last, Self.isWordChar(l) else { return nil }
+        var w = ""
+        while let c = t.last, Self.isWordChar(c) { w.insert(c, at: w.startIndex); t = t.dropLast() }
+        return w
     }
 
     /// Space with the two system shortcuts: a quick double space after a
