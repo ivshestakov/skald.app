@@ -149,7 +149,6 @@ final class KeyboardModel: ObservableObject {
     }
 
     var returnLabel: String {
-        if translateMode { return "go" }
         switch host?.proxy.returnKeyType ?? .default {
         case .send:     return "send"
         case .search:   return "search"
@@ -296,26 +295,44 @@ final class KeyboardModel: ObservableObject {
         host?.proxy.adjustTextPosition(byCharacterOffset: n)
     }
 
-    /// Vertical trackpad movement: jump to the same column on the previous /
-    /// next line. Works on real line breaks; soft-wrapped lines are invisible
-    /// to a keyboard extension.
+    /// Approximate characters per visual line: a keyboard extension can't see
+    /// the host's layout, so long paragraphs are treated as wrapped every
+    /// `charsPerLine` characters. Tuned for the default body font in portrait.
+    private var charsPerLine: Int { metrics == .landscape ? 80 : 38 }
+
+    /// Vertical trackpad movement: one visual line up or down, keeping the
+    /// column. Uses real line breaks plus the wrap estimate above.
     func moveCursorLines(_ delta: Int) {
         guard let proxy = host?.proxy, delta != 0 else { return }
+        let n = charsPerLine
         let before = proxy.documentContextBeforeInput ?? ""
         let after = proxy.documentContextAfterInput ?? ""
-        let column = before.reversed().prefix { $0 != "\n" }.count
+        let paraBefore = before.reversed().prefix { $0 != "\n" }.count      // chars since paragraph start
+        let column = paraBefore % n
         if delta < 0 {
-            guard let nl = before.lastIndex(of: "\n") else { proxy.adjustTextPosition(byCharacterOffset: -column); return }
-            let prevLine = before[..<nl]
-            let prevLen = prevLine.reversed().prefix { $0 != "\n" }.count
-            let target = min(column, prevLen)
-            proxy.adjustTextPosition(byCharacterOffset: -(column + 1 + (prevLen - target)))
+            if paraBefore >= n {                                              // previous visual line, same paragraph
+                proxy.adjustTextPosition(byCharacterOffset: -n)
+                return
+            }
+            guard let nl = before.lastIndex(of: "\n") else {                  // first line of the text
+                proxy.adjustTextPosition(byCharacterOffset: -paraBefore); return
+            }
+            let prevLen = before[..<nl].reversed().prefix { $0 != "\n" }.count
+            let lastLineStart = prevLen == 0 ? 0 : (prevLen - 1) / n * n
+            let target = min(lastLineStart + column, prevLen)
+            proxy.adjustTextPosition(byCharacterOffset: -(paraBefore + 1 + (prevLen - target)))
         } else {
-            guard let nl = after.firstIndex(of: "\n") else { proxy.adjustTextPosition(byCharacterOffset: after.count); return }
-            let restOfLine = after.distance(from: after.startIndex, to: nl)
-            let nextLine = after[after.index(after: nl)...]
-            let nextLen = nextLine.prefix { $0 != "\n" }.count
-            proxy.adjustTextPosition(byCharacterOffset: restOfLine + 1 + min(column, nextLen))
+            let rest = after.prefix { $0 != "\n" }.count                       // chars to paragraph end
+            let roomOnThisLine = n - column
+            if rest > roomOnThisLine {                                          // next visual line, same paragraph
+                proxy.adjustTextPosition(byCharacterOffset: min(n, rest))
+                return
+            }
+            guard let nl = after.firstIndex(of: "\n") else {
+                proxy.adjustTextPosition(byCharacterOffset: rest); return
+            }
+            let nextLen = after[after.index(after: nl)...].prefix { $0 != "\n" }.count
+            proxy.adjustTextPosition(byCharacterOffset: rest + 1 + min(column, nextLen))
         }
     }
 
@@ -890,6 +907,28 @@ final class KeyboardModel: ObservableObject {
         composer = sentHistory[next]
         host?.playClick()
         textDidChange()
+    }
+
+    /// ↑ next to the translation field: translate what's in the field, or the
+    /// text already before the cursor when the field is empty.
+    func sendTranslation() {
+        if composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { translate() } else { commitComposer() }
+    }
+
+    /// Settings panel: add/remove a layout language (at least one stays).
+    func toggleKeyboardLanguage(_ l: Language) {
+        host?.playClick()
+        var list = settings.keyboardLanguages
+        if let i = list.firstIndex(of: l) {
+            guard list.count > 1 else { return }
+            list.remove(at: i)
+        } else {
+            list.append(l)
+        }
+        settings.keyboardLanguages = list
+        languageIndex = min(languageIndex, list.count - 1)
+        objectWillChange.send()
+        Autocorrect.shared.preload(currentLanguage)
     }
 
     func toggleSettings() {

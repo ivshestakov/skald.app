@@ -34,9 +34,10 @@ App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
   multi-touch layer over the SwiftUI keys): two-thumb typing, release on the
   key under the finger, glide from shift/123 to a key (one capital / one digit
   and back), long-press pop-ups, backspace repeat that switches to deleting
-  whole words after ~1.5 s, **space-bar trackpad** (hold space, drag to move
-  the cursor horizontally and, across real line breaks, vertically; letters
-  hide like the system).
+  whole words after ~1.5 s, **space-bar trackpad** (hold space; the whole
+  keyboard becomes a trackpad: ~8 pt per character, ~28 pt per line, line
+  moves only on clearly vertical motion; lines are real line breaks plus an
+  estimated wrap every 38 characters, since extensions can't see layout).
 - **Host field traits**: number pad for numberPad/decimalPad/phonePad
   fields, `@`/`.` keys for e-mail, `.`/`/` for URLs, no corrections in
   password/e-mail/URL fields or when the app turns autocorrection off,
@@ -68,21 +69,23 @@ App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
   the three shipped languages take 12 MB of the bundle.
 - **Layout switching = swipe on the space bar** (left: next, right:
   previous) through the layouts chosen under Settings → Keyboard layouts.
-  The space key shows the current one (`ру`, `ук`, `en`). The idea is to keep
+  The space key shows the current one (`ру`, `ук`, `en`) and faint ‹ ›
+  chevrons when more than one layout is enabled. The idea is to keep
   only the English system keyboard and let Skald cover the rest.
 - **Emoji key**: in-keyboard emoji panel, 1 898 emoji in 9 categories plus
   Recents (generated from Unicode `emoji-test.txt`, `Keyboard/EmojiData.swift`).
 - **Top bar** = the system-style suggestion strip, with two translation
   controls on the right:
-  - **Target-language flag** (source is always the current layout's
-    language). Tap: the strip turns into the *translation field* — plain
-    text only, what you type goes there — and the return key becomes a blue
-    **↑**. ↑ translates the field and inserts the result into the app, then
-    closes the field. With an empty field ↑ translates the text already
-    before the cursor in place. Swipe left/right in the field to recall the
-    last five texts you sent this session. **Undo** (after an insertion)
-    takes it back and reopens the field.
-  - **Style button**: a panel over the keys with *Translate to*, *Engine*
+  - **Translate** button (source is always the current layout's language,
+    target from the panel). Tap: the strip becomes `× | translation field | ↑`,
+    the settings button hides, the return key stays standard. What you type
+    goes into the field (plain text, no live translation); ↑ translates it
+    and inserts the result into the app, then closes the field. With an
+    empty field ↑ translates the text already before the cursor in place.
+    Swipe left/right in the field to recall the last five texts you sent
+    this session. **Undo** (after an insertion) takes it back.
+  - **Style button**: a panel over the keys with *Layouts* (which languages
+    the space-bar swipe cycles), *Translate to*, *Engine*
     (Apple / Google / DeepL / Claude) and *Style*: five tone icons over a
     gradient slider that snaps to them, plus an on/off switch (Claude only).
 - Direction in the translation field: current layout → "translate to"

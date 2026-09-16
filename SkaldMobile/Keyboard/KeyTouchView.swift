@@ -120,9 +120,18 @@ final class KeyTouchUIView: UIView {
             if state.popupShown {
                 model.updatePopupSelection(x: p.x)
             } else if state.cursorMode {
-                state.cursorAccumulator += p.x - state.lastPoint.x
-                state.cursorAccumulatorY += p.y - state.lastPoint.y
-                let step: CGFloat = 9, stepY: CGFloat = 26
+                // Like the system trackpad: ~8 pt per character, ~28 pt per
+                // line, and a line move only when the finger is clearly
+                // going up/down (otherwise sideways drift would change lines).
+                let dx = p.x - state.lastPoint.x, dy = p.y - state.lastPoint.y
+                if abs(dy) > abs(dx) * 1.5 {
+                    state.cursorAccumulatorY += dy
+                    state.cursorAccumulator = 0
+                } else {
+                    state.cursorAccumulator += dx
+                    state.cursorAccumulatorY *= 0.5
+                }
+                let step: CGFloat = 8, stepY: CGFloat = 28
                 let n = Int(state.cursorAccumulator / step)
                 if n != 0 {
                     model.moveCursor(by: n)
@@ -130,7 +139,7 @@ final class KeyTouchUIView: UIView {
                 }
                 let m = Int(state.cursorAccumulatorY / stepY)
                 if m != 0 {
-                    model.moveCursorLines(m)
+                    model.moveCursorLines(m > 0 ? 1 : -1)
                     state.cursorAccumulatorY -= CGFloat(m) * stepY
                 }
             } else if state.startKey == .space, !state.swiped {

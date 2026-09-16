@@ -43,7 +43,7 @@ struct SetupView: View {
 
                 Section("How it works") {
                     step("⌨️", "Type your message with the Skald keyboard in any app — it has \(settings.primaryLanguage.displayName) and \(settings.secondaryLanguage.displayName) layouts.")
-                    step("🏳️", "Tap the **flag** at the top right, type, then hit the blue **↑**: the translation goes into the app. Swipe the space bar to switch layouts.")
+                    step("🏳️", "Tap **Translate** at the top right, type, then hit **↑**: the translation goes into the app. Swipe the space bar to switch layouts, hold it to move the cursor.")
                     step("↩️", "Not happy? **Undo** brings your original back.")
                 }
 
