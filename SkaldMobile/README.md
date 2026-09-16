@@ -100,6 +100,18 @@ so a rebuilt keyboard may still show the old code. Kill it after installing:
 xcrun simctl spawn booted launchctl list | grep skald.ios.keyboard | awk '{print $1}' | xargs -I{} xcrun simctl spawn booted /bin/kill -9 {}
 ```
 
+## Release to TestFlight
+
+`./release-ios.sh` = xcodegen → `xcodebuild archive` (Release, **manual
+signing**) → `-exportArchive` to an IPA → `xcrun altool --upload-app`. Signing
+uses two App Store profiles created through the ASC API and the Apple
+Distribution cert of team 975ZZPJQNB; the App Group is assigned to both
+bundle IDs in the developer portal (the public API can enable the
+capability but can't assign a group — that step was done in the web UI).
+Xcode's automatic signing with the ASC key failed with "Authentication
+failed: bearer token", hence manual. App Store Connect app: "Skald
+Translator", Apple ID 6812791271; TestFlight internal group "Internal".
+
 For a device: open `Skald.xcodeproj` in Xcode, make sure the Apple ID for
 team 975ZZPJQNB is signed in, and run. Automatic signing registers the App
 Group.
