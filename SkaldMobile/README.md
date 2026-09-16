@@ -1,0 +1,121 @@
+# Skald for iOS — translating keyboard
+
+Status: **MVP, runs in the simulator** (2026-09-16). Not yet on a device,
+not on TestFlight.
+
+Two targets, one shared code folder:
+
+```
+SkaldMobile/
+├── project.yml        — xcodegen spec (the .xcodeproj is generated, not committed)
+├── App/               — container app (SwiftUI): Setup / Translate / Settings tabs
+├── Keyboard/          — SkaldKeyboard.appex (UIInputViewController + SwiftUI)
+└── Shared/            — compiled into both targets:
+    ├── Language.swift, Engine.swift, Tone.swift   — same enums as the Mac app
+    ├── SkaldSettings.swift    — App Group UserDefaults + shared Keychain
+    ├── TranslationService.swift — async Google / DeepL / Claude, language detection
+    ├── AppleTranslator.swift  — Translation.framework bridge (needs a host view)
+    └── TranslateFailure.swift — one-line error texts
+```
+
+Bundle IDs: `com.ivshestakov.skald.ios` (app), `.ios.keyboard` (extension).
+App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
+
+## How the keyboard works
+
+- Full keyboard with shift, caps (double-tap), numbers and symbols pages,
+  long-press alternates (ъ, ё, ґ, ß, é, ą, …), backspace repeat,
+  auto-capitalisation at sentence start, system key clicks.
+- **Language key** (`RU` / `UK` / `EN`…): cycles through the layouts chosen
+  under Settings → Keyboard layouts; long-press shows a picker. The idea is
+  to keep only the English system keyboard and let Skald cover the rest.
+- **Emoji key**: in-keyboard emoji panel, 1 898 emoji in 9 categories plus
+  Recents (generated from Unicode `emoji-test.txt`, `Keyboard/EmojiData.swift`).
+- **Translate** (top bar) is a mode toggle:
+  - *Off* — the keyboard types into the app like any other.
+  - *On* — a composer strip appears; what you type collects there and a live
+    translation shows under it (debounced 0.7 s). **Return / Insert** puts the
+    translation into the app, **as is** inserts your original, **Undo** (top
+    bar) takes the inserted translation back and restores the composer. With
+    an empty composer the ⤓ button translates the text already before the
+    cursor in place (selection first, otherwise the current paragraph).
+- Direction: text in the "translate to" language is translated back into
+  your primary language; anything else goes to "translate to". The chip in
+  the top bar shows the detected pair.
+- The tone pill appears when Claude + "Adapt style" are on; tapping cycles.
+- Google, DeepL and Claude need **Allow Full Access** (network). Without it
+  the keyboard says so instead of failing silently. The Apple engine runs
+  offline, but language packs must be downloaded from the app first —
+  a keyboard extension can't show the download sheet.
+
+## Matching the system keyboard
+
+Measured against the iOS 26.4 simulator (light) and iOS 27 device photos
+(dark); constants live in `KeyboardMetrics` / `KeyboardPalette`
+(`Keyboard/KeyboardView.swift`):
+
+| | value |
+|---|---|
+| key height / row pitch | 42 pt / 54 pt |
+| key gap / side inset | 7 pt / 6 pt |
+| corner radius | 7 pt |
+| small keys (123, emoji, lang) / return | 43.5 pt / 2×43.5+7 |
+| letters | SF 23 pt regular |
+| light: background / keys | `#DFE0E6` / `#FFFFFF`, no shadow |
+| dark: background / keys | `#212121` / `#454545` |
+
+All keys share one colour (iOS 26+ dropped the grey special keys). Return
+shows the ⏎ symbol for the default return type, the space key is blank with
+the language code (`ру`, `ук`, `en`) in its corner. Layouts: RU 11/11/9 (ъ, ё
+via long-press), UK 12/12/10 with the apostrophe key and ґ, as on iOS 27.
+
+Pixel sampling helper used for the measurements: `scratchpad/px.swift`
+(a 40-line CoreGraphics tool, not part of the project).
+
+## Build & run
+
+```bash
+cd SkaldMobile
+xcodegen generate
+xcodebuild -project Skald.xcodeproj -scheme Skald \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+xcrun simctl install booted build/Build/Products/Debug-iphonesimulator/Skald.app
+xcrun simctl launch booted com.ivshestakov.skald.ios
+```
+
+Then in the simulator: Settings → General → Keyboard → Keyboards → Add New
+Keyboard → Skald → Allow Full Access. In the app's Translate tab, long-press
+🌐 and pick Skald.
+
+Simulator gotcha: if no software keyboard appears, the Simulator has
+"Connect Hardware Keyboard" on (I/O → Keyboard, ⇧⌘K). Or:
+`defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false`
+and restart Simulator.app.
+
+Gotcha: iOS keeps the keyboard-extension process alive across reinstalls,
+so a rebuilt keyboard may still show the old code. Kill it after installing:
+
+```bash
+xcrun simctl spawn booted launchctl list | grep skald.ios.keyboard | awk '{print $1}' | xargs -I{} xcrun simctl spawn booted /bin/kill -9 {}
+```
+
+For a device: open `Skald.xcodeproj` in Xcode, make sure the Apple ID for
+team 975ZZPJQNB is signed in, and run. Automatic signing registers the App
+Group.
+
+## Known gaps / next steps
+
+- Not tested on a physical device yet; the Apple (on-device) engine has not
+  been verified inside the extension at all.
+- `documentContextBeforeInput` only reaches back to the current paragraph;
+  multi-paragraph messages translate paragraph by paragraph.
+- No swipe typing, no autocorrect/predictions (the top bar sits where the
+  system's predictive bar would be).
+- CJK languages fall back to the Latin layout (you can still translate text
+  typed with a system CJK keyboard by switching to Skald and tapping
+  Translate).
+- Shared code is a copy of the Mac app's, not a Swift package; keep the
+  Claude prompt and tone directives in sync by hand for now.
+- App Store: needs privacy nutrition labels (Full Access disclosure),
+  screenshots, and a keyboard-extension review note.

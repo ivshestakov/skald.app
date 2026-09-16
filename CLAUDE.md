@@ -67,6 +67,27 @@ TranslatorApp/
     └── Updater.swift               — Sparkle SPUStandardUpdaterController wrapper
 ```
 
+## iOS keyboard (SkaldMobile/) — added 2026-09-15
+
+Ivan wants a mobile version as a **translating keyboard**. It lives in
+`SkaldMobile/` (xcodegen project, `project.yml` is the source of truth;
+`Skald.xcodeproj` and `build/` are git-ignored). See
+`SkaldMobile/README.md` for structure, build steps and known gaps.
+
+- App `com.ivshestakov.skald.ios` + extension `.ios.keyboard`, App Group
+  `group.com.ivshestakov.skald`, min iOS 18, automatic signing, team
+  `975ZZPJQNB`.
+- `Shared/` is a platform-neutral copy of the Mac app's Language / Engine
+  / Tone / Settings / Translator code (async). Claude prompt and tone
+  directives are duplicated — change both when editing one.
+- Status (2026-09-16): MVP verified in the iPhone 17 Pro simulator —
+  typing, RU/UK/EN layouts + language key, long-press alternates, emoji
+  panel, Translate *mode* (composer + live preview, Return inserts), Undo,
+  light/dark styling matched to the system keyboard (iOS 26.4 sim + iOS 27
+  photos). Not yet run on a device; Apple on-device engine unverified
+  inside the extension. Ivan's goal: keep only the English system keyboard
+  and let Skald replace the RU/UK ones, so it must look identical to iOS 27.
+
 ## Codesigning identity
 
 The build.sh signs with a stable self-signed cert in the user's login
