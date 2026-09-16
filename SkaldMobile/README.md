@@ -63,18 +63,22 @@ App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
   to keep only the English system keyboard and let Skald cover the rest.
 - **Emoji key**: in-keyboard emoji panel, 1 898 emoji in 9 categories plus
   Recents (generated from Unicode `emoji-test.txt`, `Keyboard/EmojiData.swift`).
-- **Translate** (top bar) is a mode toggle:
-  - *Off* — the keyboard types into the app like any other.
-  - *On* — a composer strip appears; what you type collects there and a live
-    translation shows under it (debounced 0.7 s). **Return / Insert** puts the
-    translation into the app, **as is** inserts your original, **Undo** (top
-    bar) takes the inserted translation back and restores the composer. With
-    an empty composer the ⤓ button translates the text already before the
-    cursor in place (selection first, otherwise the current paragraph).
-- Direction: text in the "translate to" language is translated back into
-  your primary language; anything else goes to "translate to". The chip in
-  the top bar shows the detected pair.
-- The tone pill appears when Claude + "Adapt style" are on; tapping cycles.
+- **Top bar** = the system-style suggestion strip, with two translation
+  controls on the left:
+  - **Target-language flag** (source is always the current layout's
+    language). Tap: the strip turns into the *translation field*; what you
+    type goes there, the live translation shows under it (debounced 0.7 s),
+    and the return key becomes a blue **↑**. ↑ inserts the translation into
+    the app and closes the field. **as is** inserts your original; with an
+    empty field ↑ translates the text already before the cursor in place.
+    **Undo** (appears after an insertion) takes it back and reopens the field.
+  - **Style button**: a panel over the keys with *Translate to*, *Engine*
+    (Apple / Google / DeepL / Claude) and *Style* (Off + the five tones,
+    Claude only).
+- Direction in the translation field: current layout → "translate to"
+  (or → primary when you're typing in the "translate to" language, or the
+  language picked in the panel). In-place translation of existing text
+  still detects the language.
 - Google, DeepL and Claude need **Allow Full Access** (network). Without it
   the keyboard says so instead of failing silently. The Apple engine runs
   offline, but language packs must be downloaded from the app first —

@@ -14,7 +14,7 @@ final class KeyboardViewController: UIInputViewController, KeyboardHost {
     private var heightConstraint: NSLayoutConstraint?
     private var cancellables: Set<AnyCancellable> = []
 
-    private var keyboardHeight: CGFloat { model.metrics.totalHeight(translateMode: model.translateMode) }
+    private var keyboardHeight: CGFloat { model.metrics.totalHeight(translateMode: false) }
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -45,9 +45,8 @@ final class KeyboardViewController: UIInputViewController, KeyboardHost {
             DispatchQueue.main.async { self?.model.lexicon = map }
         }
 
-        // Translate mode adds the composer strip: grow/shrink the keyboard.
-        model.$translateMode.map { _ in () }
-            .merge(with: model.$metrics.removeDuplicates().map { _ in () })
+        // Portrait/landscape presets change the height.
+        model.$metrics.removeDuplicates().map { _ in () }
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self, let h = self.heightConstraint else { return }

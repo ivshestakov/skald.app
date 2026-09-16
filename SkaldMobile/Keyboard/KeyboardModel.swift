@@ -76,6 +76,24 @@ final class KeyboardModel: ObservableObject {
     // Translate mode: keystrokes go into `composer`, `preview` is the live
     // translation, Return inserts the preview into the document.
     @Published var translateMode = false
+    @Published var showSettings = false
+    /// Explicit "translate to" choice from the settings panel; nil = derived.
+    @Published var targetOverride: Language?
+
+    /// Source = language of the current layout; target = the configured
+    /// "translate to" language, or the primary one when you're typing in it.
+    var translatePair: LanguagePair {
+        let src = currentLanguage
+        if let t = targetOverride, t != src { return LanguagePair(source: src, target: t) }
+        let t = src == settings.secondaryLanguage ? settings.primaryLanguage : settings.secondaryLanguage
+        return LanguagePair(source: src, target: t)
+    }
+
+    func setTarget(_ l: Language) {
+        targetOverride = l
+        direction = translatePair
+        if translateMode { schedulePreview() }
+    }
     @Published var composer = ""
     @Published var preview = ""
     @Published var previewBusy = false
@@ -114,7 +132,7 @@ final class KeyboardModel: ObservableObject {
     }
 
     var returnLabel: String {
-        if translateMode, !composer.trimmingCharacters(in: .whitespaces).isEmpty { return "insert" }
+        if translateMode { return "go" }
         switch host?.proxy.returnKeyType ?? .default {
         case .send:     return "send"
         case .search:   return "search"
@@ -156,8 +174,8 @@ final class KeyboardModel: ObservableObject {
         case .space:
             tapSpace()
         case .ret:
-            if translateMode, !composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                commitComposer()
+            if translateMode {
+                if composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { translate() } else { commitComposer() }
             } else {
                 host?.proxy.insertText("\n")
                 textDidChange()
@@ -704,6 +722,28 @@ final class KeyboardModel: ObservableObject {
 
     func cancelPopup() { popup = nil }
 
+    func setEngine(_ e: Engine) {
+        host?.playClick()
+        settings.engine = e
+        objectWillChange.send()
+        if translateMode { schedulePreview() }
+    }
+
+    func setAdaptStyle(_ on: Bool) {
+        host?.playClick()
+        settings.adaptStyleEnabled = on
+        objectWillChange.send()
+        if translateMode { schedulePreview() }
+    }
+
+    func setTone(_ t: Tone) {
+        host?.playClick()
+        settings.adaptStyleEnabled = true
+        settings.tone = t
+        objectWillChange.send()
+        if translateMode { schedulePreview() }
+    }
+
     func cycleTone() {
         let all = Tone.allCases
         let idx = all.firstIndex(of: settings.tone) ?? 2
@@ -714,13 +754,33 @@ final class KeyboardModel: ObservableObject {
     // MARK: - Translate mode
 
     func toggleTranslateMode() {
+        if translateMode { exitTranslateMode() } else { enterTranslateMode() }
+    }
+
+    func enterTranslateMode() {
         host?.playClick()
-        translateMode.toggle()
-        previewTask?.cancel()
+        translateMode = true
+        showSettings = false
         composer = ""; preview = ""; previewFor = ""; previewBusy = false
         if case .error = status { status = .idle }
         if page == .emoji { page = .letters }
+        direction = translatePair
         textDidChange()
+    }
+
+    func exitTranslateMode() {
+        host?.playClick()
+        translateMode = false
+        previewTask?.cancel()
+        composer = ""; preview = ""; previewFor = ""; previewBusy = false
+        if case .error = status { status = .idle }
+        textDidChange()
+    }
+
+    func toggleSettings() {
+        host?.playClick()
+        showSettings.toggle()
+        if showSettings { hideKeyPreview(); popup = nil }
     }
 
     private func checkAccess(_ engine: Engine) -> Bool {
@@ -739,7 +799,7 @@ final class KeyboardModel: ObservableObject {
             preview = ""; previewFor = ""; previewBusy = false
             return
         }
-        direction = LanguageDetector.pair(for: text, settings: settings)
+        direction = translatePair
         let engine = settings.engine
         let pair = direction
         previewTask = Task { [weak self] in
@@ -779,7 +839,7 @@ final class KeyboardModel: ObservableObject {
         previewTask?.cancel()
         let engine = settings.engine
         guard checkAccess(engine) else { return }
-        let pair = LanguageDetector.pair(for: text, settings: settings)
+        let pair = translatePair
         direction = pair
         status = .busy
         task = Task { [weak self] in
@@ -803,6 +863,7 @@ final class KeyboardModel: ObservableObject {
         settings.recordHistory(source: source, target: translated, engine: settings.engine)
         composer = ""; preview = ""; previewFor = ""; previewBusy = false
         status = .done
+        translateMode = false           // the field collapses back to suggestions
         textDidChange()
     }
 
@@ -876,7 +937,8 @@ final class KeyboardModel: ObservableObject {
         guard let undo, let proxy = host?.proxy else { return }
         for _ in 0..<undo.translated.count { proxy.deleteBackward() }
         if !undo.original.isEmpty { proxy.insertText(undo.original) }
-        if let restore = undo.composerRestore, translateMode {
+        if let restore = undo.composerRestore {
+            translateMode = true
             composer = restore
             schedulePreview()
         }

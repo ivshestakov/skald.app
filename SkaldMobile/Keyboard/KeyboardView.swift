@@ -52,17 +52,16 @@ struct KeyboardView: View {
         VStack(spacing: 0) {
             TopBar(model: model)
                 .frame(height: m.topBarHeight)
-                .padding(.horizontal, 8)
-            if model.translateMode {
-                ComposerStrip(model: model)
-                    .frame(height: m.composerHeight)
-                    .padding(.horizontal, 8)
-            }
+                .padding(.horizontal, 6)
             Group {
-                switch model.page {
-                case .emoji:     EmojiPanel(model: model)
-                case .numberPad: numberPad
-                default:         keyRows
+                if model.showSettings {
+                    TranslateSettingsPanel(model: model)
+                } else {
+                    switch model.page {
+                    case .emoji:     EmojiPanel(model: model)
+                    case .numberPad: numberPad
+                    default:         keyRows
+                    }
                 }
             }
             .frame(height: m.keysHeight)
@@ -272,7 +271,7 @@ struct KeyView: View {
     private var isSpecial: Bool { !isCharOrSpace }
     private var pressed: Bool { model.pressedKeys.contains(key) }
     private var shiftActive: Bool { key == .shift && model.shift != .off }
-    private var returnBlue: Bool { key == .ret && model.returnKeyTinted && !model.translateMode }
+    private var returnBlue: Bool { key == .ret && (model.returnKeyTinted || model.translateMode) }
 
     private var fill: Color {
         if returnBlue { return pressed ? Color.accentColor.opacity(0.7) : Color.accentColor }
@@ -305,7 +304,9 @@ struct KeyView: View {
                     .padding(.bottom, 4)
             }
         case .ret:
-            if model.returnLabel == "return" {
+            if model.translateMode {
+                Image(systemName: "arrow.up").font(.system(size: 19, weight: .bold))
+            } else if model.returnLabel == "return" {
                 Image(systemName: "return").font(.system(size: 18))
             } else {
                 Text(model.returnLabel).font(.system(size: 16))
@@ -329,66 +330,67 @@ struct KeyView: View {
 }
 
 // MARK: - Top bar
+//
+// Left: translation controls (target-language flag, style). Right, filling
+// the rest: the suggestion strip like the system keyboard — or, in translate
+// mode, the translation field (what you type + live translation).
 
 struct TopBar: View {
     @ObservedObject var model: KeyboardModel
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        HStack(spacing: 8) {
-            HStack(spacing: 4) {
-                Text(model.direction.source.flag)
-                Image(systemName: "arrow.right").font(.system(size: 10, weight: .bold))
-                Text(model.direction.target.flag)
-            }
-            .font(.system(size: 15))
-            .padding(.horizontal, 8)
-            .frame(height: 30)
-            .background(KeyboardPalette.chip(scheme), in: Capsule())
-
-            if model.showsTonePill {
-                Button(action: model.cycleTone) {
-                    HStack(spacing: 4) {
-                        Image(systemName: model.settings.tone.symbolName)
-                        Text(model.settings.tone.shortLabel)
-                    }
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 9)
-                    .frame(height: 30)
-                    .background(model.settings.tone.color, in: Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-
-            statusView
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-            if model.undo != nil {
-                Button(action: model.undoTranslation) {
-                    Image(systemName: "arrow.uturn.backward")
-                        .font(.system(size: 15, weight: .semibold))
-                        .frame(width: 34, height: 30)
-                        .background(KeyboardPalette.chip(scheme), in: Capsule())
-                }
-                .buttonStyle(.plain)
-            }
-
+        HStack(spacing: 6) {
+            // Target-language flag: tap = open the translation field.
             Button(action: model.toggleTranslateMode) {
-                HStack(spacing: 5) {
-                    Image(systemName: "character.bubble")
-                    Text("Translate")
+                HStack(spacing: 3) {
+                    Text(model.translatePair.target.flag).font(.system(size: 20))
+                    if model.translateMode {
+                        Image(systemName: "xmark").font(.system(size: 10, weight: .bold))
+                    }
                 }
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(model.translateMode ? .white : Color.accentColor)
-                .padding(.horizontal, 12)
-                .frame(height: 32)
+                .frame(width: model.translateMode ? 50 : 40, height: 34)
                 .background(
-                    Capsule().fill(model.translateMode ? Color.accentColor : KeyboardPalette.chip(scheme))
+                    RoundedRectangle(cornerRadius: model.metrics.keyCornerRadius, style: .continuous)
+                        .fill(model.translateMode ? Color.accentColor.opacity(0.18) : KeyboardPalette.chip(scheme))
                 )
-                .overlay(Capsule().strokeBorder(Color.accentColor.opacity(model.translateMode ? 0 : 0.6), lineWidth: 1))
             }
             .buttonStyle(.plain)
+
+            // Style / engine settings.
+            Button(action: model.toggleSettings) {
+                Image(systemName: model.showsTonePill ? model.settings.tone.symbolName : "slider.horizontal.3")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(model.showSettings ? Color.white : KeyboardPalette.text(scheme))
+                    .frame(width: 36, height: 34)
+                    .background(
+                        RoundedRectangle(cornerRadius: model.metrics.keyCornerRadius, style: .continuous)
+                            .fill(model.showSettings ? Color.accentColor : KeyboardPalette.chip(scheme))
+                    )
+            }
+            .buttonStyle(.plain)
+
+            if model.undo != nil, !model.translateMode {
+                Button(action: model.undoTranslation) {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(width: 32, height: 34)
+                        .background(
+                            RoundedRectangle(cornerRadius: model.metrics.keyCornerRadius, style: .continuous)
+                                .fill(KeyboardPalette.chip(scheme))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+
+            Group {
+                if model.translateMode {
+                    TranslationField(model: model)
+                } else {
+                    statusView
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .foregroundStyle(KeyboardPalette.text(scheme))
     }
@@ -396,7 +398,7 @@ struct TopBar: View {
     @ViewBuilder
     private var statusView: some View {
         switch model.status {
-        case .idle where !model.suggestions.isEmpty && !model.translateMode:
+        case .idle where !model.suggestions.isEmpty:
             HStack(spacing: 0) {
                 ForEach(Array(model.suggestions.enumerated()), id: \.offset) { i, s in
                     if i > 0 {
@@ -416,14 +418,15 @@ struct TopBar: View {
                 }
             }
         case .idle:
-            EmptyView()
+            Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         case .busy:
-            ProgressView().controlSize(.small)
+            ProgressView().controlSize(.small).frame(maxWidth: .infinity)
         case .done:
             Label("Translated", systemImage: "checkmark")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .padding(.leading, 6)
         case .error(let text):
             Button(action: model.dismissError) {
                 Label(text, systemImage: "exclamationmark.triangle.fill")
@@ -438,73 +441,65 @@ struct TopBar: View {
     }
 }
 
-// MARK: - Composer strip (translate mode)
-
-struct ComposerStrip: View {
+/// The translation field that replaces the suggestion strip while the
+/// translate mode is on: your text on top, the live translation below.
+struct TranslationField: View {
     @ObservedObject var model: KeyboardModel
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(model.composer.isEmpty ? "Type here — the translation goes into the app" : model.composer)
-                    .font(.system(size: 15))
-                    .foregroundStyle(model.composer.isEmpty ? .secondary : KeyboardPalette.text(scheme))
-                    .lineLimit(1)
-                    .truncationMode(.head)
-                HStack(spacing: 6) {
-                    if model.previewBusy {
-                        ProgressView().controlSize(.mini)
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 0) {
+                    Text(model.composer.isEmpty ? placeholder : model.composer)
+                        .font(.system(size: 14))
+                        .foregroundStyle(model.composer.isEmpty ? .secondary : KeyboardPalette.text(scheme))
+                        .lineLimit(1)
+                        .truncationMode(.head)
+                    if !model.composer.isEmpty {
+                        Rectangle().fill(Color.accentColor).frame(width: 2, height: 16)   // caret
                     }
+                }
+                HStack(spacing: 4) {
+                    if model.previewBusy { ProgressView().controlSize(.mini) }
                     Text(previewLine)
-                        .font(.system(size: 14, weight: .medium))
+                        .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(previewColor)
                         .lineLimit(1)
                         .truncationMode(.head)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-
             if !model.composer.isEmpty {
                 Button(action: model.insertComposerAsIs) {
                     Text("as is")
-                        .font(.system(size: 12, weight: .semibold))
-                        .padding(.horizontal, 9)
-                        .frame(height: 30)
+                        .font(.system(size: 11, weight: .semibold))
+                        .padding(.horizontal, 7)
+                        .frame(height: 24)
                         .background(KeyboardPalette.chip(scheme), in: Capsule())
                 }
                 .buttonStyle(.plain)
             }
-
-            Button {
-                if model.composer.trimmingCharacters(in: .whitespaces).isEmpty {
-                    model.translate()
-                } else {
-                    model.commitComposer()
-                }
-            } label: {
-                Image(systemName: model.composer.isEmpty ? "text.insert" : "arrow.down.to.line")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 40, height: 32)
-                    .background(Color.accentColor, in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .disabled(model.status == .busy)
         }
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity)
-        .frame(height: model.metrics.composerHeight - 8)
+        .padding(.horizontal, 8)
+        .frame(height: 38)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(scheme == .dark ? Color(white: 0.22) : Color.white.opacity(0.9))
+            RoundedRectangle(cornerRadius: model.metrics.keyCornerRadius, style: .continuous)
+                .fill(KeyboardPalette.key(scheme))
         )
-        .foregroundStyle(KeyboardPalette.text(scheme))
+        .overlay(
+            RoundedRectangle(cornerRadius: model.metrics.keyCornerRadius, style: .continuous)
+                .strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1)
+        )
+    }
+
+    private var placeholder: String {
+        "\(model.translatePair.source.flag) → \(model.translatePair.target.flag)  type, then ↑"
     }
 
     private var previewLine: String {
         if case .error(let text) = model.status { return text }
-        if model.composer.isEmpty { return "Empty? ⤓ translates what's already in the field" }
+        if model.composer.isEmpty { return "Empty + ↑ translates the text already in the field" }
         if model.preview.isEmpty { return model.previewBusy ? "Translating…" : "…" }
         return model.preview
     }
@@ -512,6 +507,95 @@ struct ComposerStrip: View {
     private var previewColor: Color {
         if case .error = model.status { return .orange }
         return model.preview.isEmpty ? .secondary : Color.accentColor
+    }
+}
+
+// MARK: - Translate settings panel (replaces the keys while open)
+
+struct TranslateSettingsPanel: View {
+    @ObservedObject var model: KeyboardModel
+    @Environment(\.colorScheme) private var scheme
+
+    private let tones = Tone.allCases
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            row("Translate to") {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(Language.allCases.filter { $0 != model.currentLanguage }) { l in
+                            chip("\(l.flag) \(l.shortCode)", selected: model.translatePair.target == l) { model.setTarget(l) }
+                        }
+                    }
+                }
+            }
+            row("Engine") {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(Engine.allCases) { e in
+                            chip(e.shortName, selected: model.settings.engine == e) { model.setEngine(e) }
+                        }
+                    }
+                }
+            }
+            row("Style") {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        chip("Off", selected: !model.settings.adaptStyleEnabled) { model.setAdaptStyle(false) }
+                        ForEach(tones) { t in
+                            chip(t.shortLabel, selected: model.settings.adaptStyleEnabled && model.settings.tone == t,
+                                 tint: t.color) { model.setTone(t) }
+                        }
+                    }
+                }
+            }
+            .opacity(model.settings.engine == .claude ? 1 : 0.35)
+            .disabled(model.settings.engine != .claude)
+            Text(model.settings.engine == .claude
+                 ? model.settings.tone.subtitle
+                 : "Style adaptation needs the Claude engine.")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            Spacer(minLength: 0)
+            HStack {
+                Spacer()
+                Button(action: model.toggleSettings) {
+                    Text("Done")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 18)
+                        .frame(height: 34)
+                        .background(Color.accentColor, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 4)
+        .foregroundStyle(KeyboardPalette.text(scheme))
+    }
+
+    private func row<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 78, alignment: .leading)
+            content()
+        }
+    }
+
+    private func chip(_ text: String, selected: Bool, tint: Color = .accentColor, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(text)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(selected ? .white : KeyboardPalette.text(scheme))
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(Capsule().fill(selected ? tint : KeyboardPalette.key(scheme)))
+        }
+        .buttonStyle(.plain)
     }
 }
 
