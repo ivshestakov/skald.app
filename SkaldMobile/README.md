@@ -44,6 +44,18 @@ App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
   autocapitalization mode (none/words/sentences/all) from the field, blue
   Go/Search/Send/Done return key, user Text Replacement shortcuts via the
   supplementary lexicon. Landscape gets its own metrics preset.
+- **Parity work (2026-09-17, see `docs/native-parity.html`)**: the bar
+  follows the native layout — `"typed"` · highlighted correction · alternative —
+  with the correction computed while typing, so space / punctuation / Return
+  apply it instantly. Backspace after a correction only removes the
+  separator and re-offers the typed word (quoted); retyping the same word is
+  not corrected again. Touch geometry feeds the corrector (finger proximity
+  to nearby keys per letter). English contractions (dont → don't, i → I),
+  Smart Punctuation (« » / “ ”, ‘ ’, -- → —), Contacts names and
+  blank-shortcut Text Replacements as protected words, backspace speeds
+  500 ms / 100 ms / words at 350 ms after 20 chars, rollover typing,
+  trackpad gain by finger speed, ASCII fields switch to the Latin layout,
+  numbersAndPunctuation opens 123, "Reset learned words" in the app.
 - **Auto-correction & suggestions** (`Keyboard/Autocorrect.swift`):
   per-language frequency dictionaries (OpenSubtitles 2018 top-50k,
   `Keyboard/Resources/freq_*.txt`, CC-BY-SA) plus a **bigram model** built

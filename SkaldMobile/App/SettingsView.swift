@@ -43,6 +43,10 @@ struct SettingsView: View {
                     Toggle("Auto-correction", isOn: binding(\.autocorrectEnabled))
                     Toggle("Suggestions", isOn: binding(\.suggestionsEnabled))
                     Toggle("Haptic feedback", isOn: binding(\.hapticsEnabled))
+                    Button("Reset learned words", role: .destructive) {
+                        settings.learnedWords = [:]
+                        settings.learnedFixes = [:]
+                    }
                 } header: {
                     Text("Typing")
                 } footer: {

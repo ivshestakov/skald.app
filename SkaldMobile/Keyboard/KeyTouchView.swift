@@ -39,6 +39,7 @@ final class KeyTouchUIView: UIView {
         var popupShown = false
         var cursorMode = false
         var committed = false            // rollover: typed already by a second touch-down
+        var popupCancelled = false
         var cursorAccumulator: CGFloat = 0
         var cursorAccumulatorY: CGFloat = 0
         var swiped = false
@@ -61,6 +62,21 @@ final class KeyTouchUIView: UIView {
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         if !touches.isEmpty { return true }
         return key(at: point) != nil
+    }
+
+    /// Proximity (0…1) of the point to each single-letter key within ~1.4 key
+    /// widths — the touch geometry the corrector uses for substitutions.
+    private func proximity(at p: CGPoint) -> [Character: Double] {
+        var out: [Character: Double] = [:]
+        var unit: CGFloat = 32
+        if let any = frames.first(where: { if case .char = $0.key { return true } else { return false } }) { unit = any.value.width }
+        for (k, f) in frames {
+            guard case .char(let g) = k, g.count == 1, let ch = g.lowercased().first, ch.isLetter else { continue }
+            let dx = (p.x - f.midX) / unit, dy = (p.y - f.midY) / (f.height * 1.15)
+            let d = (dx * dx + dy * dy).squareRoot()
+            if d < 1.4 { out[ch] = Double(max(0, 1 - d / 1.4)) }
+        }
+        return out
     }
 
     private func key(at p: CGPoint) -> Key? {
@@ -88,7 +104,8 @@ final class KeyTouchUIView: UIView {
                 if case .char? = other.currentKey {
                     other.longPressWork?.cancel()
                     other.committed = true
-                    model.keyReleased(other.startKey, releasedOn: other.currentKey, start: other.startKey)
+                    model.keyReleased(other.startKey, releasedOn: other.currentKey, start: other.startKey,
+                                      proximity: proximity(at: other.lastPoint))
                 }
             }
             let state = TouchState(startKey: key, point: p)
@@ -129,20 +146,31 @@ final class KeyTouchUIView: UIView {
             guard let state = self.touches[t], !state.committed else { continue }
             let p = t.location(in: self)
             if state.popupShown {
-                model.updatePopupSelection(x: p.x)
+                // Sliding well below the key cancels the callout (system rule).
+                if let f = frames[state.startKey], p.y > f.maxY + 40 {
+                    state.popupShown = false
+                    state.popupCancelled = true
+                    model.cancelPopup()
+                } else {
+                    model.updatePopupSelection(x: p.x)
+                }
+            } else if state.popupCancelled {
+                // finger is lifting away: nothing more to do
             } else if state.cursorMode {
-                // Like the system trackpad: ~8 pt per character, ~28 pt per
-                // line, and a line move only when the finger is clearly
-                // going up/down (otherwise sideways drift would change lines).
+                // Like the system trackpad: relative movement with a gain that
+                // grows with finger speed (~6 pt per character when slow),
+                // ~28 pt per line, and a line move only when the finger is
+                // clearly going up/down.
                 let dx = p.x - state.lastPoint.x, dy = p.y - state.lastPoint.y
+                let gain = min(3, max(1, abs(dx) / 8))
                 if abs(dy) > abs(dx) * 1.5 {
                     state.cursorAccumulatorY += dy
                     state.cursorAccumulator = 0
                 } else {
-                    state.cursorAccumulator += dx
+                    state.cursorAccumulator += dx * gain
                     state.cursorAccumulatorY *= 0.5
                 }
-                let step: CGFloat = 8, stepY: CGFloat = 28
+                let step: CGFloat = 6, stepY: CGFloat = 28
                 let n = Int(state.cursorAccumulator / step)
                 if n != 0 {
                     model.moveCursor(by: n)
@@ -186,7 +214,9 @@ final class KeyTouchUIView: UIView {
             guard let state = self.touches.removeValue(forKey: t) else { continue }
             state.longPressWork?.cancel()
             if state.committed { continue }
-            if state.popupShown {
+            if state.popupCancelled {
+                model.keyReleased(state.startKey, releasedOn: nil, start: state.startKey)
+            } else if state.popupShown {
                 model.commitPopup()
                 model.keyReleased(state.startKey, releasedOn: nil, start: state.startKey)
             } else if state.cursorMode {
@@ -195,7 +225,8 @@ final class KeyTouchUIView: UIView {
             } else if state.swiped {
                 model.keyReleased(state.startKey, releasedOn: nil, start: state.startKey)
             } else {
-                model.keyReleased(state.startKey, releasedOn: state.currentKey, start: state.startKey)
+                let prox: [Character: Double]? = { if case .char? = state.currentKey { return proximity(at: state.lastPoint) } else { return nil } }()
+                model.keyReleased(state.startKey, releasedOn: state.currentKey, start: state.startKey, proximity: prox)
             }
         }
     }

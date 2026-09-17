@@ -84,6 +84,13 @@ final class KeyboardModel: ObservableObject {
     private var pendingFix: Autocorrect.Correction?
     /// Index into `suggestions` of the candidate a separator will apply.
     @Published var applyIndex: Int?
+    /// Where the finger actually landed for each letter of the word being
+    /// typed: letter → proximity of nearby keys. Feeds the corrector.
+    private var touchTrail: [(typed: Character, prox: [Character: Double])] = []
+    private var pendingProximity: [Character: Double]?
+    /// Context in which the user turned shift off by hand; auto-shift stays
+    /// off until the text changes.
+    private var shiftOffContext: String?
 
     // Translate mode: keystrokes go into `composer`, `preview` is the live
     // translation, Return inserts the preview into the document.
@@ -196,6 +203,7 @@ final class KeyboardModel: ObservableObject {
                 shift = shift == .off ? .on : .off
             }
             shiftIsAuto = false
+            shiftOffContext = shift == .off ? textBeforeCaret : nil
             lastShiftTap = now
         case .backspace:
             backspaceOnce()
@@ -207,7 +215,8 @@ final class KeyboardModel: ObservableObject {
             } else {
                 lastSpaceTap = .distantPast
                 lastInsertWasPunctuation = false
-                if autocorrectCurrentWord(separator: "\n") { return }
+                if autocorrectCurrentWord(separator: "\n") { touchTrail.removeAll(); return }
+                touchTrail.removeAll()
                 insertRaw("\n")
             }
         case .numbers:  page = .numbers
@@ -249,7 +258,9 @@ final class KeyboardModel: ObservableObject {
         if case .char(let g)? = to { showKeyPreview(g, keyFrame: nil) } else { keyPreview = nil }
     }
 
-    func keyReleased(_ key: Key, releasedOn: Key?, start: Key) {
+    func keyReleased(_ key: Key, releasedOn: Key?, start: Key, proximity: [Character: Double]? = nil) {
+        pendingProximity = proximity
+        defer { pendingProximity = nil }
         pressedKeys.remove(key)
         if let r = releasedOn { pressedKeys.remove(r) }
         hideKeyPreviewSoon()
@@ -365,8 +376,60 @@ final class KeyboardModel: ObservableObject {
         }
         lastInsertWasPunctuation = raw.count == 1 && Self.punctuation.contains(raw.first!)
         lastSpaceTap = .distantPast
-        if lastInsertWasPunctuation, autocorrectCurrentWord(separator: s) { return }
+        if lastInsertWasPunctuation {
+            touchTrail.removeAll()
+            if autocorrectCurrentWord(separator: s) { return }
+        }
+        if let smart = smartPunctuation(for: raw) {
+            switch smart {
+            case .replace(let text): insertRaw(text); return
+            case .dash: replaceBeforeCaret(count: 1, with: "—"); textDidChange(); return
+            }
+        }
+        if page == .letters, raw.count == 1, let c = s.lowercased().first, Self.isWordChar(c) {
+            touchTrail.append((c, pendingProximity ?? [:]))
+        } else if !(raw.count == 1 && Self.isWordChar(raw.first!)) {
+            touchTrail.removeAll()
+        }
         insertRaw(s)
+    }
+
+    private enum SmartPunct { case replace(String), dash }
+
+    /// Smart Punctuation like the system's: curly quotes by language, an
+    /// apostrophe that opens or closes by context, and "--" → em dash.
+    private func smartPunctuation(for raw: String) -> SmartPunct? {
+        guard !correctionsDisabled, page != .emoji, let proxy = host?.proxy else { return nil }
+        let before = textBeforeCaret
+        let opening = before.isEmpty || before.last!.isWhitespace || before.last!.isNewline || "([{«“‘".contains(before.last!)
+        switch raw {
+        case "\"":
+            guard proxy.smartQuotesType != .no else { return nil }
+            let cyrillic = currentLanguage == .russian || currentLanguage == .ukrainian
+            let pair = cyrillic ? ("«", "»") : ("“", "”")
+            return .replace(opening ? pair.0 : pair.1)
+        case "'":
+            guard proxy.smartQuotesType != .no else { return nil }
+            return .replace(opening ? "‘" : "’")
+        case "-":
+            guard proxy.smartDashesType != .no, before.hasSuffix("-"), !before.hasSuffix("--") else { return nil }
+            return .dash
+        default:
+            return nil
+        }
+    }
+
+    /// Touch data for the word at the caret, when it matches what we typed.
+    private func touchesForCurrentWord(_ word: String) -> [[Character: Double]]? {
+        guard touchTrail.count == word.count else { return nil }
+        for (t, c) in zip(touchTrail, word.lowercased()) where t.typed != c { return nil }
+        return touchTrail.map { $0.prox }
+    }
+
+    /// Straight → typographic apostrophe when the host wants smart quotes.
+    private func styled(_ text: String) -> String {
+        guard host?.proxy.smartQuotesType != .no, !correctionsDisabled else { return text }
+        return text.replacingOccurrences(of: "'", with: "’")
     }
 
     // MARK: - Autocorrect
@@ -452,13 +515,14 @@ final class KeyboardModel: ObservableObject {
         if pendingWord == word {
             let fix = pendingFix
             pendingWord = nil; pendingFix = nil
+            touchTrail.removeAll()
             guard let fix else {
                 if Autocorrect.shared.correctionWouldHaveConsidered(word, language: currentLanguage) {
                     Autocorrect.shared.noteUnknownKept(word)
                 }
                 return false
             }
-            replaceBeforeCaret(count: word.count, with: fix.replacement + separator)
+            replaceBeforeCaret(count: word.count, with: styled(fix.replacement) + separator)
             lastAutocorrect = (word, fix.replacement, separator)
             remember(original: word, replacement: fix.replacement)
             suggestions = []; applyIndex = nil
@@ -470,8 +534,10 @@ final class KeyboardModel: ObservableObject {
         let gen = correctionGeneration
         let language = currentLanguage, layout = currentLayout, prev = previousWord
         let inTranslateMode = translateMode
+        let touches = touchesForCurrentWord(word)
+        touchTrail.removeAll()
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
-            let fix = Autocorrect.shared.correction(for: word, prev: prev, language: language, layout: layout)
+            let fix = Autocorrect.shared.correction(for: word, prev: prev, language: language, layout: layout, touches: touches)
             DispatchQueue.main.async {
                 guard let self, gen == self.correctionGeneration, self.translateMode == inTranslateMode else { return }
                 guard let fix else {
@@ -482,7 +548,7 @@ final class KeyboardModel: ObservableObject {
                 }
                 let tail = word + separator
                 guard self.textBeforeCaret.hasSuffix(tail) else { return }
-                self.replaceBeforeCaret(count: tail.count, with: fix.replacement + separator)
+                self.replaceBeforeCaret(count: tail.count, with: self.styled(fix.replacement) + separator)
                 self.lastAutocorrect = (word, fix.replacement, separator)
                 self.remember(original: word, replacement: fix.replacement)
                 self.suggestions = []; self.applyIndex = nil
@@ -540,11 +606,12 @@ final class KeyboardModel: ObservableObject {
         let language = currentLanguage, layout = currentLayout
         let wantFix = settings.autocorrectEnabled && after.isEmpty && !word.isEmpty
             && lexicon[word.lowercased()] == nil && retypeGuard != word.lowercased()
+        let touches = wantFix ? touchesForCurrentWord(word) : nil
         let showBar = settings.suggestionsEnabled
         suggestionGeneration += 1
         let gen = suggestionGeneration
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
-            let fix = wantFix ? Autocorrect.shared.correction(for: word, prev: prev, language: language, layout: layout) : nil
+            let fix = wantFix ? Autocorrect.shared.correction(for: word, prev: prev, language: language, layout: layout, touches: touches) : nil
             var next: [String] = []
             var apply: Int? = nil
             if showBar {
@@ -624,7 +691,8 @@ final class KeyboardModel: ObservableObject {
         }
         lastInsertWasPunctuation = false
         lastSpaceTap = now
-        if autocorrectCurrentWord(separator: " ") { return }
+        if autocorrectCurrentWord(separator: " ") { touchTrail.removeAll(); return }
+        touchTrail.removeAll()
         insertRaw(" ")
     }
 
@@ -661,6 +729,7 @@ final class KeyboardModel: ObservableObject {
 
     private func backspaceOnce() {
         lastEditAt = Date()
+        if !touchTrail.isEmpty { touchTrail.removeLast() }
         if let ac = lastAutocorrect {
             // Native: Delete after a correction just removes the separator; the
             // typed word comes back as the quoted option in the bar (see
@@ -727,6 +796,7 @@ final class KeyboardModel: ObservableObject {
             clearUndoIfEdited()
         }
         lastAutocorrect = nil
+        touchTrail.removeAll()
         textDidChange()
     }
 
@@ -827,7 +897,8 @@ final class KeyboardModel: ObservableObject {
         }
         if capType == .words {
             let start = before.isEmpty || before.last!.isWhitespace || before.last!.isNewline
-            if start, shift == .off { shift = .on; shiftIsAuto = true }
+            if let ctx = shiftOffContext, ctx != before { shiftOffContext = nil }
+            if start, shift == .off, shiftOffContext == nil { shift = .on; shiftIsAuto = true }
             else if !start, shift == .on, shiftIsAuto { shift = .off }
             return
         }
@@ -846,8 +917,9 @@ final class KeyboardModel: ObservableObject {
             guard sawGap, let last = t.last else { return false }
             return ".!?".contains(last)
         }()
+        if let ctx = shiftOffContext, ctx != before { shiftOffContext = nil }
         if atSentenceStart, shift == .off {
-            shift = .on; shiftIsAuto = true
+            if shiftOffContext == nil { shift = .on; shiftIsAuto = true }
         } else if !atSentenceStart, shift == .on, shiftIsAuto {
             shift = .off
         }

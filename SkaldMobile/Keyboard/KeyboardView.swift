@@ -68,7 +68,7 @@ struct KeyboardView: View {
             .padding(.top, m.topPadding)
             .padding(.bottom, m.bottomPadding)
         }
-        .background(KeyboardPalette.background(scheme))
+        .background(model.cursorMode ? KeyboardPalette.cursorBackground(scheme) : KeyboardPalette.background(scheme))
         .coordinateSpace(name: "keyboard")
         .onPreferenceChange(KeyFramesKey.self) { keyFrames = $0 }
         .overlay(KeyTouchView(model: model, frames: keyFrames))
@@ -231,6 +231,13 @@ enum KeyboardPalette {
         s == .dark ? Color(hex: 0xA3A3A3) : Color(hex: 0x6B6C72)
     }
     static func chip(_ s: ColorScheme) -> Color { key(s) }
+    /// Trackpad mode: the system keyboard goes a shade lighter with blank keys.
+    static func cursorBackground(_ s: ColorScheme) -> Color {
+        s == .dark ? Color(hex: 0x2A2A2A) : Color(hex: 0xE8E9ED)
+    }
+    static func cursorKey(_ s: ColorScheme) -> Color {
+        s == .dark ? Color(hex: 0x505050) : Color(hex: 0xF3F4F7)
+    }
 }
 
 extension Color {
@@ -274,6 +281,7 @@ struct KeyView: View {
     private var returnBlue: Bool { key == .ret && model.returnKeyTinted }
 
     private var fill: Color {
+        if model.cursorMode { return KeyboardPalette.cursorKey(scheme) }
         if returnBlue { return pressed ? Color.accentColor.opacity(0.7) : Color.accentColor }
         // The system only pops up letters; special keys darken/lighten.
         if pressed, isSpecial { return KeyboardPalette.pressedKey(scheme) }

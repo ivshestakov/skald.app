@@ -41,8 +41,21 @@ final class KeyboardViewController: UIInputViewController, KeyboardHost {
         // The user's Text Replacement shortcuts (Settings → Keyboard).
         requestSupplementaryLexicon { [weak self] lexicon in
             var map: [String: String] = [:]
-            for e in lexicon.entries { map[e.userInput.lowercased()] = e.documentText }
-            DispatchQueue.main.async { self?.model.lexicon = map }
+            var words: Set<String> = []
+            for e in lexicon.entries {
+                let input = e.userInput.trimmingCharacters(in: .whitespaces)
+                // Contact names come through as word → word; a Text Replacement
+                // with a blank shortcut is the user's "never correct this".
+                if input.isEmpty || input.lowercased() == e.documentText.lowercased() {
+                    for w in e.documentText.split(separator: " ") where w.count >= 2 { words.insert(w.lowercased()) }
+                } else {
+                    map[input.lowercased()] = e.documentText
+                }
+            }
+            DispatchQueue.main.async {
+                self?.model.lexicon = map
+                Autocorrect.shared.setExternalWords(words)
+            }
         }
 
         // Portrait/landscape presets change the height.

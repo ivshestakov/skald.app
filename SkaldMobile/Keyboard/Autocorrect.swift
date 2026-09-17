@@ -164,7 +164,25 @@ final class Autocorrect {
         if seenUnknown[w]! >= 2 { learnWord(w); seenUnknown.removeValue(forKey: w) }
     }
 
-    private func isPersonal(_ lower: String) -> Bool { personalWords[lower] != nil }
+    /// Names from Contacts and words protected via Text Replacement (blank
+    /// shortcut), delivered by UILexicon: never corrected, offered as known.
+    private var externalWords: Set<String> = []
+    func setExternalWords(_ words: Set<String>) { externalWords = words }
+
+    private func isPersonal(_ lower: String) -> Bool { personalWords[lower] != nil || externalWords.contains(lower) }
+
+    /// English contractions the system fixes without a dictionary lookup.
+    private static let contractionsEN: [String: String] = [
+        "i": "I", "im": "I'm", "ive": "I've", "dont": "don't", "cant": "can't", "wont": "won't",
+        "isnt": "isn't", "arent": "aren't", "wasnt": "wasn't", "werent": "weren't", "didnt": "didn't",
+        "doesnt": "doesn't", "hasnt": "hasn't", "havent": "haven't", "hadnt": "hadn't",
+        "couldnt": "couldn't", "wouldnt": "wouldn't", "shouldnt": "shouldn't", "mustnt": "mustn't",
+        "youre": "you're", "youll": "you'll", "youve": "you've", "youd": "you'd",
+        "theyre": "they're", "theyll": "they'll", "theyve": "they've", "theyd": "they'd",
+        "weve": "we've", "thats": "that's", "whats": "what's", "hes": "he's", "shes": "she's",
+        "theres": "there's", "heres": "here's", "wheres": "where's", "whos": "who's", "hows": "how's",
+        "i'm": "I'm", "i've": "I've", "i'll": "I'll", "i'd": "I'd",
+    ]
 
     /// True when `word` is unknown to every dictionary (so leaving it as typed
     /// is a signal worth learning from).
@@ -195,12 +213,18 @@ final class Autocorrect {
 
     /// Best correction for a finished word, or nil to leave it alone.
     /// `prev` is the word before it (context for the bigram model).
-    func correction(for word: String, prev: String?, language: Language, layout: LetterLayout) -> Correction? {
-        guard word.count >= 3, let dict = dictionary(for: language) else { return nil }
+    func correction(for word: String, prev: String?, language: Language, layout: LetterLayout,
+                    touches: [[Character: Double]]? = nil) -> Correction? {
         guard word.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "’" || $0 == "-" }) else { return nil }
-        if word == word.uppercased() { return nil }                         // acronyms
-        let lower = word.lowercased()
+        if word == word.uppercased(), word.count > 1 { return nil }          // acronyms
+        let lower = word.lowercased().replacingOccurrences(of: "’", with: "'")
         if isPersonal(lower) { return nil }                                  // you told us to keep it
+        if language == .english, let c = Self.contractionsEN[lower] {
+            let cased = c.hasPrefix("I") ? c : Self.matchCase(of: word, to: c)
+            if cased != word { return Correction(original: word, replacement: cased) }
+            return nil
+        }
+        guard word.count >= 3, let dict = dictionary(for: language) else { return nil }
         if let f = personalFixes[lower], dict.freq[f] != nil || isPersonal(f) {
             return Correction(original: word, replacement: Self.matchCase(of: word, to: f))
         }
@@ -218,13 +242,14 @@ final class Autocorrect {
             let s = dict.p(cand, after: prev) * weight
             if best == nil || s > best!.score { best = (cand, s) }
         }
-        for (cand, weight) in Self.edits1(lower, alphabet: alphabet, adjacency: adjacency) {
+        let touchMaps = (touches?.count == lower.count) ? touches : nil
+        for (cand, weight) in Self.edits1(lower, alphabet: alphabet, adjacency: adjacency, touches: touchMaps) {
             consider(cand, weight: weight)
         }
         if best == nil, !known, lower.count >= 5 {
             // Second edit restricted to neighbouring keys: ~10× fewer candidates.
             var seen = Set<String>()
-            for (e1, w1) in Self.edits1(lower, alphabet: alphabet, adjacency: adjacency) {
+            for (e1, w1) in Self.edits1(lower, alphabet: alphabet, adjacency: adjacency, touches: touchMaps) {
                 for (e2, w2) in Self.edits1(e1, alphabet: alphabet, adjacency: adjacency, narrow: true) where !seen.contains(e2) {
                     seen.insert(e2)
                     consider(e2, weight: w1 * w2 * 0.05)
@@ -255,7 +280,7 @@ final class Autocorrect {
                      alwaysFixes: Bool = false, limit: Int = 3) -> [String] {
         guard !word.isEmpty, let dict = dictionary(for: language) else { return [] }
         guard word.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "’" || $0 == "-" }) else { return [] }
-        let lower = word.lowercased()
+        let lower = word.lowercased().replacingOccurrences(of: "’", with: "'")
         var out: [String] = []
         let known = dict.freq[lower] != nil || isPersonal(lower) || isKnownToSystem(word, language: language)
         if !known, word.count >= 2 { out.append("\"\(word)\"") }
@@ -289,8 +314,12 @@ final class Autocorrect {
     // MARK: Edits
 
     /// Single-edit candidates with a plausibility weight (higher = likelier slip).
+    /// `touches`, when present, holds for each typed letter the proximity
+    /// (0…1) of the finger to every nearby key; a substitution is then
+    /// weighted by how close the finger actually was to the proposed letter
+    /// instead of by static key adjacency.
     private static func edits1(_ w: String, alphabet: [Character], adjacency: [Character: Set<Character>],
-                               narrow: Bool = false) -> [(String, Double)] {
+                               narrow: Bool = false, touches: [[Character: Double]]? = nil) -> [(String, Double)] {
         let chars = Array(w)
         var out: [(String, Double)] = []
         out.reserveCapacity(chars.count * (alphabet.count * 2 + 2))
@@ -310,8 +339,13 @@ final class Autocorrect {
                 // substitution — much likelier when the keys are neighbours
                 if i < chars.count, c != chars[i] {
                     var s = chars; s[i] = c
-                    let near = adjacency[chars[i]]?.contains(c) ?? false
-                    out.append((String(s), near ? 3.0 : 0.7))
+                    let weight: Double
+                    if let t = touches, i < t.count {
+                        weight = 0.3 + 2.7 * (t[i][c] ?? 0)
+                    } else {
+                        weight = (adjacency[chars[i]]?.contains(c) ?? false) ? 3.0 : 0.7
+                    }
+                    out.append((String(s), weight))
                 }
                 // insertion
                 var ins = chars; ins.insert(c, at: i); out.append((String(ins), 1.0))
@@ -328,6 +362,7 @@ final class Autocorrect {
         var set = Set<Character>()
         for row in layout.rows { for k in row { for ch in k { set.insert(ch) } } }
         for (_, alts) in KeyAlternates.table { for a in alts { if let ch = a.first, ch.isLetter, set.contains(a.lowercased().first!) == false { set.insert(ch) } } }
+        set.insert("'")                                       // dropped apostrophes: dont → don't
         let a = Array(set).sorted()
         alphabetCache[layout.id] = a
         return a
