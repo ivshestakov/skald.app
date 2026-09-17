@@ -65,6 +65,9 @@ final class KeyboardModel: ObservableObject {
     @Published var bottomExtras: [String] = []       // e.g. ["@", "."] for e-mail fields
     @Published var returnKeyTinted = false
     private var correctionsDisabled = false
+    private var periodShortcutDisabled = false
+    private var lastDocumentID: UUID?
+    private var languageIndexBeforeASCII: Int?
     /// User's Settings → Keyboard → Text Replacement shortcuts.
     var lexicon: [String: String] = [:]
     /// Words this session auto-corrected: replacement (lowercased) → what was typed.
@@ -72,6 +75,15 @@ final class KeyboardModel: ObservableObject {
     private var correctionOrder: [String] = []
     /// Set right after an automatic correction; backspace reverts it.
     private var lastAutocorrect: (original: String, replacement: String, separator: String)?
+    /// Native rule: after the user deletes back into a corrected word, retyping
+    /// the same word does not trigger the same correction again.
+    private var retypeGuard: String?
+    /// Correction computed while typing for the word at the caret. The bar
+    /// shows it highlighted; the next separator applies exactly this.
+    private var pendingWord: String?
+    private var pendingFix: Autocorrect.Correction?
+    /// Index into `suggestions` of the candidate a separator will apply.
+    @Published var applyIndex: Int?
 
     // Translate mode: keystrokes go into `composer`, `preview` is the live
     // translation, Return inserts the preview into the document.
@@ -193,8 +205,10 @@ final class KeyboardModel: ObservableObject {
             if translateMode {
                 if composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { translate() } else { commitComposer() }
             } else {
-                host?.proxy.insertText("\n")
-                textDidChange()
+                lastSpaceTap = .distantPast
+                lastInsertWasPunctuation = false
+                if autocorrectCurrentWord(separator: "\n") { return }
+                insertRaw("\n")
             }
         case .numbers:  page = .numbers
         case .letters:  page = .letters
@@ -254,7 +268,7 @@ final class KeyboardModel: ObservableObject {
         case (.numbers, .char), (.symbols, .char), (.letters, .char):
             // Glide from a page key: type the key under the finger, go back.
             perform(target)
-            if start == .numbers, let back = pageBeforeGlide { page = back }
+            if let back = pageBeforeGlide { page = back }
         case (.shift, .shift):
             perform(.shift)
         case (_, .shift), (_, .numbers), (_, .symbols), (_, .letters):
@@ -351,8 +365,7 @@ final class KeyboardModel: ObservableObject {
         }
         lastInsertWasPunctuation = raw.count == 1 && Self.punctuation.contains(raw.first!)
         lastSpaceTap = .distantPast
-        if lastInsertWasPunctuation { autocorrectCurrentWord(separator: s) }
-        if lastAutocorrect?.separator == s { return }   // text replacement already inserted it
+        if lastInsertWasPunctuation, autocorrectCurrentWord(separator: s) { return }
         insertRaw(s)
     }
 
@@ -410,24 +423,49 @@ final class KeyboardModel: ObservableObject {
     }
 
     /// Called when a word is finished with `separator`. Text replacements
-    /// apply at once; dictionary correction runs in the background and is
-    /// applied afterwards if the text still ends with that word — so typing
-    /// never waits. Returns true when it inserted the separator itself.
+    /// apply at once. The dictionary correction was computed while the word
+    /// was being typed (`pendingFix`, shown highlighted in the bar) and is
+    /// applied synchronously; if it isn't ready yet (very fast typing) it is
+    /// computed in the background and applied afterwards if the text still
+    /// ends with that word. Returns true when it inserted the separator itself.
     private var correctionGeneration = 0
 
-    private func autocorrectCurrentWord(separator: String) {
+    @discardableResult
+    private func autocorrectCurrentWord(separator: String) -> Bool {
         lastAutocorrect = nil
-        guard page == .letters, !correctionsDisabled else { return }
+        guard page == .letters, !correctionsDisabled else { return false }
         let word = currentWord
-        guard !word.isEmpty else { return }
+        guard !word.isEmpty else { return false }
+        if let g = retypeGuard {
+            retypeGuard = nil
+            if g == word.lowercased() { return false }
+        }
         if let rep = lexicon[word.lowercased()] {
             replaceBeforeCaret(count: word.count, with: rep + separator)
             lastAutocorrect = (word, rep, separator)
-            suggestions = []
+            suggestions = []; applyIndex = nil
             textDidChange()
-            return
+            return true
         }
-        guard settings.autocorrectEnabled else { return }
+        guard settings.autocorrectEnabled else { return false }
+
+        if pendingWord == word {
+            let fix = pendingFix
+            pendingWord = nil; pendingFix = nil
+            guard let fix else {
+                if Autocorrect.shared.correctionWouldHaveConsidered(word, language: currentLanguage) {
+                    Autocorrect.shared.noteUnknownKept(word)
+                }
+                return false
+            }
+            replaceBeforeCaret(count: word.count, with: fix.replacement + separator)
+            lastAutocorrect = (word, fix.replacement, separator)
+            remember(original: word, replacement: fix.replacement)
+            suggestions = []; applyIndex = nil
+            textDidChange()
+            return true
+        }
+
         correctionGeneration += 1
         let gen = correctionGeneration
         let language = currentLanguage, layout = currentLayout, prev = previousWord
@@ -442,29 +480,16 @@ final class KeyboardModel: ObservableObject {
                     }
                     return
                 }
-                // Still "word + separator" right before the caret?
                 let tail = word + separator
                 guard self.textBeforeCaret.hasSuffix(tail) else { return }
                 self.replaceBeforeCaret(count: tail.count, with: fix.replacement + separator)
                 self.lastAutocorrect = (word, fix.replacement, separator)
                 self.remember(original: word, replacement: fix.replacement)
-                self.suggestions = []
+                self.suggestions = []; self.applyIndex = nil
                 self.textDidChange()
             }
         }
-    }
-
-    /// Backspace right after an autocorrect puts the original word back.
-    private func revertAutocorrectIfNeeded() -> Bool {
-        guard let ac = lastAutocorrect else { return false }
-        lastAutocorrect = nil
-        let before = textBeforeCaret
-        guard before.hasSuffix(ac.replacement + ac.separator) else { return false }
-        replaceBeforeCaret(count: ac.replacement.count + ac.separator.count, with: ac.original + ac.separator)
-        Autocorrect.shared.learnWord(ac.original)
-        correctionHistory.removeValue(forKey: ac.replacement.lowercased())
-        textDidChange()
-        return true
+        return false
     }
 
     /// Tap on a suggestion in the top bar: replace the word at the caret
@@ -497,9 +522,13 @@ final class KeyboardModel: ObservableObject {
 
     private var suggestionGeneration = 0
 
+    /// Rebuilds the bar in the background. While a word is being typed this
+    /// also decides the correction the next separator will apply, so the
+    /// bar can show it highlighted (native layout: "typed" · fix · other).
     private func updateSuggestions() {
-        guard settings.suggestionsEnabled, !correctionsDisabled, page == .letters, status == .idle || translateMode else {
-            suggestions = []; return
+        guard settings.suggestionsEnabled || settings.autocorrectEnabled, !correctionsDisabled, page == .letters,
+              status == .idle || translateMode else {
+            suggestions = []; applyIndex = nil; pendingWord = nil; pendingFix = nil; return
         }
         let before = currentWord
         let after = wordAfterCaret
@@ -509,24 +538,43 @@ final class KeyboardModel: ObservableObject {
         let prevForPrediction = t.hasSuffix(" ") ? previousWordForPrediction(t) : nil
         let history = correctionHistory[word.lowercased()]
         let language = currentLanguage, layout = currentLayout
+        let wantFix = settings.autocorrectEnabled && after.isEmpty && !word.isEmpty
+            && lexicon[word.lowercased()] == nil && retypeGuard != word.lowercased()
+        let showBar = settings.suggestionsEnabled
         suggestionGeneration += 1
         let gen = suggestionGeneration
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
-            var next: [String]
-            if word.isEmpty {
-                next = prevForPrediction.map { Autocorrect.shared.nextWords(after: $0, language: language) } ?? []
-            } else {
-                next = Autocorrect.shared.suggestions(forPartial: word, prev: prev, language: language,
-                                                      layout: layout, alwaysFixes: !after.isEmpty)
-                if let original = history, original.lowercased() != word.lowercased() {
-                    next.removeAll { $0 == original }
-                    next.insert(original, at: 0)
-                    if next.count > 3 { next.removeLast(next.count - 3) }
+            let fix = wantFix ? Autocorrect.shared.correction(for: word, prev: prev, language: language, layout: layout) : nil
+            var next: [String] = []
+            var apply: Int? = nil
+            if showBar {
+                if word.isEmpty {
+                    next = prevForPrediction.map { Autocorrect.shared.nextWords(after: $0, language: language) } ?? []
+                } else if let fix {
+                    // "typed" · ★fix · one alternative
+                    let alts = Autocorrect.shared.suggestions(forPartial: word, prev: prev, language: language,
+                                                              layout: layout, alwaysFixes: true, limit: 4)
+                        .filter { !$0.hasPrefix("\"") && $0 != fix.replacement && $0 != word }
+                    next = ["\"\(word)\"", fix.replacement] + alts.prefix(1)
+                    apply = 1
+                } else {
+                    next = Autocorrect.shared.suggestions(forPartial: word, prev: prev, language: language,
+                                                          layout: layout, alwaysFixes: !after.isEmpty)
+                    if let original = history, original.lowercased() != word.lowercased() {
+                        // What the user typed, quoted like the native bar; tapping
+                        // it keeps and learns the word.
+                        let quoted = "\"\(original)\""
+                        next.removeAll { $0 == original || $0 == quoted }
+                        next.insert(quoted, at: 0)
+                        if next.count > 3 { next.removeLast(next.count - 3) }
+                    }
                 }
             }
             DispatchQueue.main.async {
                 guard let self, gen == self.suggestionGeneration else { return }
+                if wantFix { self.pendingWord = word; self.pendingFix = fix } else { self.pendingWord = nil; self.pendingFix = nil }
                 if next != self.suggestions { self.suggestions = next }
+                if apply != self.applyIndex { self.applyIndex = apply }
             }
         }
     }
@@ -547,7 +595,7 @@ final class KeyboardModel: ObservableObject {
         let now = Date()
         // Consecutive space presses (nothing typed in between) — the system
         // keyboard doesn't time them either, it only requires a word before.
-        let quick = lastSpaceTap != .distantPast
+        let quick = lastSpaceTap != .distantPast && !periodShortcutDisabled
         let before = translateMode ? composer : (host?.proxy.documentContextBeforeInput ?? "")
         let wordEnd: Bool = {
             // "…word " → last char is one space, char before it is a letter/number
@@ -576,8 +624,7 @@ final class KeyboardModel: ObservableObject {
         }
         lastInsertWasPunctuation = false
         lastSpaceTap = now
-        autocorrectCurrentWord(separator: " ")
-        if lastAutocorrect != nil { return }             // text replacement inserted the space
+        if autocorrectCurrentWord(separator: " ") { return }
         insertRaw(" ")
     }
 
@@ -614,7 +661,14 @@ final class KeyboardModel: ObservableObject {
 
     private func backspaceOnce() {
         lastEditAt = Date()
-        if revertAutocorrectIfNeeded() { return }
+        if let ac = lastAutocorrect {
+            // Native: Delete after a correction just removes the separator; the
+            // typed word comes back as the quoted option in the bar (see
+            // correctionHistory) and the same correction won't fire again if
+            // the user deletes into the word and retypes it.
+            lastAutocorrect = nil
+            if textBeforeCaret.hasSuffix(ac.replacement + ac.separator) { retypeGuard = ac.original.lowercased() }
+        }
         let base = textBeforeCaret
         if translateMode, !composer.isEmpty {
             composer.removeLast()
@@ -629,17 +683,27 @@ final class KeyboardModel: ObservableObject {
 
     private var backspaceCount = 0
 
-    /// Long-press on backspace: repeat, then after a while delete whole words.
+    /// Long-press on backspace: ≈100 ms per character for ~20 characters,
+    /// then whole words at ≈350 ms — the system's three speeds.
     func startBackspaceRepeat() {
         stopBackspaceRepeat()
-        repeatTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+        scheduleBackspaceRepeat(interval: 0.1)
+    }
+
+    private func scheduleBackspaceRepeat(interval: TimeInterval) {
+        repeatTimer?.invalidate()
+        repeatTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                // Every repeated deletion clicks and taps like the system key.
                 self.host?.playClick()
                 if self.settings.hapticsEnabled { self.host?.playHaptic() }
                 self.backspaceCount += 1
-                if self.backspaceCount > 14 { self.deleteWordBackward() } else { self.backspaceOnce() }
+                if self.backspaceCount > 20 {
+                    self.deleteWordBackward()
+                    if self.backspaceCount == 21 { self.scheduleBackspaceRepeat(interval: 0.35) }
+                } else {
+                    self.backspaceOnce()
+                }
             }
         }
     }
@@ -698,6 +762,24 @@ final class KeyboardModel: ObservableObject {
         if extras != bottomExtras { bottomExtras = extras }
         correctionsDisabled = (proxy.isSecureTextEntry ?? false) || proxy.autocorrectionType == .no
             || proxy.keyboardType == .emailAddress || proxy.keyboardType == .URL
+        periodShortcutDisabled = [.emailAddress, .URL, .webSearch].contains(proxy.keyboardType ?? .default)
+
+        // Per-field one-offs, applied when the host document changes.
+        let docID = proxy.documentIdentifier
+        if docID != lastDocumentID {
+            lastDocumentID = docID
+            let asciiTypes: [UIKeyboardType] = [.asciiCapable, .emailAddress, .URL, .webSearch, .twitter]
+            let wantsASCII = asciiTypes.contains(proxy.keyboardType ?? .default)
+            if wantsASCII, LetterLayout.forLanguage(currentLanguage) != .latin,
+               let latin = keyboardLanguages.firstIndex(where: { LetterLayout.forLanguage($0) == .latin }) {
+                languageIndexBeforeASCII = languageIndex
+                languageIndex = latin
+            } else if !wantsASCII, let back = languageIndexBeforeASCII {
+                languageIndexBeforeASCII = nil
+                if back < keyboardLanguages.count { languageIndex = back }
+            }
+            if proxy.keyboardType == .numbersAndPunctuation, page == .letters { page = .numbers }
+        }
         let tintTypes: [UIReturnKeyType] = [.go, .search, .send, .done, .join, .route, .emergencyCall, .continue]
         let hasText = !(proxy.documentContextBeforeInput ?? "").isEmpty || !(proxy.documentContextAfterInput ?? "").isEmpty
         let tinted = tintTypes.contains(proxy.returnKeyType ?? .default) && (!(proxy.enablesReturnKeyAutomatically ?? false) || hasText)
@@ -750,13 +832,18 @@ final class KeyboardModel: ObservableObject {
             return
         }
         let atSentenceStart: Bool = {
-            let t = before
-            if t.isEmpty { return true }
-            let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty { return true }
-            guard let last = trimmed.last, t.last?.isWhitespace == true || t.last?.isNewline == true else {
-                return false
+            if before.isEmpty { return true }
+            // Strip trailing whitespace and opening quotes/brackets; a newline
+            // anywhere in that tail is a sentence start on its own.
+            var t = Substring(before)
+            var sawGap = false
+            while let l = t.last, l.isWhitespace || l.isNewline || "«\"“‘'([".contains(l) {
+                if l.isNewline { return true }
+                if l.isWhitespace { sawGap = true }
+                t = t.dropLast()
             }
+            if t.isEmpty { return true }
+            guard sawGap, let last = t.last else { return false }
             return ".!?".contains(last)
         }()
         if atSentenceStart, shift == .off {
@@ -789,7 +876,7 @@ final class KeyboardModel: ObservableObject {
     func hideKeyPreviewSoon() {
         previewToken += 1
         let token = previewToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) { [weak self] in
             guard let self, self.previewToken == token else { return }
             self.keyPreview = nil
         }

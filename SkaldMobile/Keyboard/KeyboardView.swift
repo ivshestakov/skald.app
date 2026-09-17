@@ -414,11 +414,15 @@ struct TopBar: View {
                     }
                     Button { model.acceptSuggestion(s) } label: {
                         Text(s)
-                            .font(.system(size: 16))
+                            .font(.system(size: 16, weight: model.applyIndex == i ? .medium : .regular))
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                             .frame(maxWidth: .infinity)
-                            .frame(height: 36)
+                            .frame(height: 34)
+                            .background(
+                                RoundedRectangle(cornerRadius: model.metrics.keyCornerRadius, style: .continuous)
+                                    .fill(model.applyIndex == i ? KeyboardPalette.key(scheme) : Color.clear)
+                            )
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)

@@ -38,6 +38,7 @@ final class KeyTouchUIView: UIView {
         var longPressWork: DispatchWorkItem?
         var popupShown = false
         var cursorMode = false
+        var committed = false            // rollover: typed already by a second touch-down
         var cursorAccumulator: CGFloat = 0
         var cursorAccumulatorY: CGFloat = 0
         var swiped = false
@@ -81,6 +82,15 @@ final class KeyTouchUIView: UIView {
         for t in touches {
             let p = t.location(in: self)
             guard let key = key(at: p) else { continue }
+            // Rollover typing: a new touch-down commits any character key still
+            // held by another finger, so letters land in touch-down order.
+            for (_, other) in self.touches where !other.committed && !other.popupShown && !other.cursorMode {
+                if case .char? = other.currentKey {
+                    other.longPressWork?.cancel()
+                    other.committed = true
+                    model.keyReleased(other.startKey, releasedOn: other.currentKey, start: other.startKey)
+                }
+            }
             let state = TouchState(startKey: key, point: p)
             self.touches[t] = state
             model.keyDown(key)
@@ -92,8 +102,9 @@ final class KeyTouchUIView: UIView {
         state.longPressWork?.cancel()
         let delay: Double
         switch key {
-        case .char, .language, .space: delay = 0.35
-        case .backspace: delay = 0.4
+        case .char, .language: delay = 0.45
+        case .space: delay = 0.45
+        case .backspace: delay = 0.5
         default: return
         }
         let work = DispatchWorkItem { [weak self, weak model] in
@@ -115,7 +126,7 @@ final class KeyTouchUIView: UIView {
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let model else { return }
         for t in touches {
-            guard let state = self.touches[t] else { continue }
+            guard let state = self.touches[t], !state.committed else { continue }
             let p = t.location(in: self)
             if state.popupShown {
                 model.updatePopupSelection(x: p.x)
@@ -174,6 +185,7 @@ final class KeyTouchUIView: UIView {
         for t in touches {
             guard let state = self.touches.removeValue(forKey: t) else { continue }
             state.longPressWork?.cancel()
+            if state.committed { continue }
             if state.popupShown {
                 model.commitPopup()
                 model.keyReleased(state.startKey, releasedOn: nil, start: state.startKey)
