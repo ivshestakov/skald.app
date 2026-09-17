@@ -27,6 +27,8 @@ final class SkaldSettings: ObservableObject {
         static let kbLanguages   = "skald.keyboardLanguages"
         static let recentEmoji   = "skald.recentEmoji"
         static let haptics       = "skald.haptics"
+        static let keySounds     = "skald.keySounds"
+        static let lastLayout    = "skald.lastKeyboardLanguage"
         static let autocorrect   = "skald.autocorrect"
         static let suggestions   = "skald.suggestions"
         static let learnedWords  = "skald.learnedWords"
@@ -87,6 +89,12 @@ final class SkaldSettings: ObservableObject {
         set { defaults.set(newValue, forKey: Key.haptics); objectWillChange.send() }
     }
 
+    /// Key click sounds (three system samples: letter, modifier, delete).
+    var keySoundsEnabled: Bool {
+        get { defaults.object(forKey: Key.keySounds) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.keySounds); objectWillChange.send() }
+    }
+
     var autocorrectEnabled: Bool {
         get { defaults.object(forKey: Key.autocorrect) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.autocorrect); objectWillChange.send() }
@@ -105,6 +113,12 @@ final class SkaldSettings: ObservableObject {
     var learnedFixes: [String: String] {
         get { defaults.dictionary(forKey: Key.learnedFixes) as? [String: String] ?? [:] }
         set { defaults.set(newValue, forKey: Key.learnedFixes) }
+    }
+
+    /// The layout the user last switched to; restored when the keyboard opens.
+    var lastKeyboardLanguage: Language? {
+        get { defaults.string(forKey: Key.lastLayout).flatMap(Language.init) }
+        set { defaults.set(newValue?.rawValue, forKey: Key.lastLayout) }
     }
 
     static let recentEmojiLimit = 32

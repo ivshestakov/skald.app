@@ -56,6 +56,16 @@ App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
   500 ms / 100 ms / words at 350 ms after 20 chars, rollover typing,
   trackpad gain by finger speed, ASCII fields switch to the Latin layout,
   numbersAndPunctuation opens 123, "Reset learned words" in the app.
+- **P2 (2026-09-17)**: dynamic key hit areas — a likely next letter (from
+  dictionary prefix completions, or the first letters of likely next words)
+  claims touches up to 6 pt outside its visible key, as in Apple's patent;
+  three key click samples (letter / modifier / delete, loaded from the
+  system's UISounds, own "Key sounds" switch); emoji search (magnifier in the
+  emoji panel → the bar becomes a search field, Latin layout, English names
+  from `emoji-names.txt`) and skin-tone variants on long-press; ".com .net
+  .org .ua .ru .edu" on long-press of "." in URL/email fields; the return
+  key greys out and does nothing when the host asks for it on an empty field;
+  landscape key area 162 pt; the chosen layout is remembered across sessions.
 - **Auto-correction & suggestions** (`Keyboard/Autocorrect.swift`):
   per-language frequency dictionaries (OpenSubtitles 2018 top-50k,
   `Keyboard/Resources/freq_*.txt`, CC-BY-SA) plus a **bigram model** built

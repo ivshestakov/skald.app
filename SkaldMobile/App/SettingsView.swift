@@ -42,6 +42,7 @@ struct SettingsView: View {
                 Section {
                     Toggle("Auto-correction", isOn: binding(\.autocorrectEnabled))
                     Toggle("Suggestions", isOn: binding(\.suggestionsEnabled))
+                    Toggle("Key sounds", isOn: binding(\.keySoundsEnabled))
                     Toggle("Haptic feedback", isOn: binding(\.hapticsEnabled))
                     Button("Reset learned words", role: .destructive) {
                         settings.learnedWords = [:]

@@ -265,6 +265,36 @@ final class Autocorrect {
         return Correction(original: word, replacement: Self.matchCase(of: word, to: b.word))
     }
 
+    /// Likelihood (0…1, max-normalised) of each next letter given the word
+    /// prefix typed so far — or, at a word start, the first letters of the
+    /// likely next words. Drives the dynamic key hit areas.
+    func nextLetterDistribution(prefix: String, prev: String?, language: Language) -> [Character: Double] {
+        guard let dict = dictionary(for: language) else { return [:] }
+        var acc: [Character: Double] = [:]
+        let lower = prefix.lowercased()
+        if lower.isEmpty {
+            guard let prev else { return [:] }
+            for (i, w) in dict.nextWords(after: prev, limit: 12).enumerated() {
+                if let c = w.first { acc[c, default: 0] += Double(12 - i) }
+            }
+        } else {
+            let s = dict.sorted
+            var lo = 0, hi = s.count
+            while lo < hi { let m = (lo + hi) / 2; if s[m] < lower { lo = m + 1 } else { hi = m } }
+            var i = lo, scanned = 0
+            while i < s.count, s[i].hasPrefix(lower), scanned < 600 {
+                let w = s[i]
+                if w.count > lower.count {
+                    let c = w[w.index(w.startIndex, offsetBy: lower.count)]
+                    acc[c, default: 0] += Double(dict.freq[w] ?? 0)
+                }
+                i += 1; scanned += 1
+            }
+        }
+        guard let top = acc.values.max(), top > 0 else { return [:] }
+        return acc.mapValues { $0 / top }
+    }
+
     /// Likely next words after `prev` (for the suggestion bar when the caret
     /// sits after a space).
     func nextWords(after prev: String, language: Language, limit: Int = 3) -> [String] {

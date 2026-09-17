@@ -1,3 +1,4 @@
+import AudioToolbox
 import Combine
 import SwiftUI
 import UIKit
@@ -123,8 +124,33 @@ final class KeyboardViewController: UIInputViewController, KeyboardHost {
 
     var proxy: UITextDocumentProxy { textDocumentProxy }
 
-    func playClick() {
-        UIDevice.current.playInputClick()
+    /// The system keyboard uses three samples: letters, modifiers, delete.
+    /// They ship in /System/Library/Audio/UISounds; we load them by file and
+    /// fall back to the generic input click if unavailable. Our own "Key
+    /// sounds" switch stands in for the system setting we cannot read.
+    private lazy var clickSounds: [KeyClick: SystemSoundID] = {
+        var out: [KeyClick: SystemSoundID] = [:]
+        let files: [KeyClick: String] = [.letter: "key_press_click", .modifier: "key_press_modifier", .delete: "key_press_delete"]
+        for (kind, name) in files {
+            let url = URL(fileURLWithPath: "/System/Library/Audio/UISounds/\(name).caf")
+            var id: SystemSoundID = 0
+            if FileManager.default.fileExists(atPath: url.path),
+               AudioServicesCreateSystemSoundID(url as CFURL, &id) == kAudioServicesNoError {
+                out[kind] = id
+            }
+        }
+        return out
+    }()
+
+    func playClick() { playClick(.letter) }
+
+    func playClick(_ kind: KeyClick) {
+        guard model.settings.keySoundsEnabled else { return }
+        if let id = clickSounds[kind] {
+            AudioServicesPlaySystemSound(id)
+        } else {
+            UIDevice.current.playInputClick()
+        }
     }
 
     // UIFeedbackGenerator only fires inside a keyboard extension when the

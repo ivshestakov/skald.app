@@ -12,17 +12,20 @@ import UIKit
 struct KeyTouchView: UIViewRepresentable {
     @ObservedObject var model: KeyboardModel
     let frames: [Key: CGRect]
+    let bias: [Character: Double]
 
     func makeUIView(context: Context) -> KeyTouchUIView {
         let v = KeyTouchUIView()
         v.model = model
         v.frames = frames
+        v.letterBias = bias
         return v
     }
 
     func updateUIView(_ uiView: KeyTouchUIView, context: Context) {
         uiView.model = model
         uiView.frames = frames
+        uiView.letterBias = bias
     }
 }
 
@@ -30,6 +33,9 @@ final class KeyTouchUIView: UIView {
 
     weak var model: KeyboardModel?
     var frames: [Key: CGRect] = [:]
+    /// Next-letter likelihood; a likely key's hidden hit area grows by up to
+    /// 6 pt per side (Apple's dynamic key targets — the visuals never change).
+    var letterBias: [Character: Double] = [:]
 
     private final class TouchState {
         let startKey: Key
@@ -80,9 +86,27 @@ final class KeyTouchUIView: UIView {
     }
 
     private func key(at p: CGPoint) -> Key? {
-        // Keys are laid out with gaps; treat the gap as belonging to the
-        // nearest key so slightly-off taps still register, like the system.
-        if let exact = frames.first(where: { $0.value.contains(p) })?.key { return exact }
+        // 1. A likely next letter claims the touch when it lands in its
+        //    expanded (hidden) hit area, even if that is inside a neighbour.
+        var expandedHit: (Key, Double)?
+        if !letterBias.isEmpty {
+            for (k, f) in frames {
+                guard case .char(let g) = k, let ch = g.lowercased().first, let b = letterBias[ch], b > 0.15 else { continue }
+                let grown = f.insetBy(dx: -6 * b, dy: -4 * b)
+                if grown.contains(p), expandedHit == nil || b > expandedHit!.1 { expandedHit = (k, b) }
+            }
+        }
+        // 2. Otherwise the key under the finger; gaps belong to the nearest key.
+        let exact = frames.first(where: { $0.value.contains(p) })?.key
+        if let (k, b) = expandedHit {
+            // Only override the exact key when the finger is near its edge.
+            if let exact, exact != k, let f = frames[exact] {
+                let inset = f.insetBy(dx: 6 * b, dy: 4 * b)
+                if inset.contains(p) { return exact }
+            }
+            return k
+        }
+        if let exact { return exact }
         var best: (Key, CGFloat)?
         for (k, f) in frames {
             let dx = max(f.minX - p.x, 0, p.x - f.maxX)

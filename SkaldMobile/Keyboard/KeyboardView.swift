@@ -18,8 +18,8 @@ struct KeyboardMetrics: Equatable {
     static let portrait = KeyboardMetrics(gap: 7, rowGap: 12, rowHeight: 42, sidePadding: 6, topBarHeight: 44,
                                           topPadding: 5, composerHeight: 56, keyCornerRadius: 7, bottomPadding: 4,
                                           smallKeyWidth: 43.5, letterFont: 23)
-    static let landscape = KeyboardMetrics(gap: 9, rowGap: 7, rowHeight: 33, sidePadding: 4, topBarHeight: 38,
-                                           topPadding: 3, composerHeight: 44, keyCornerRadius: 6, bottomPadding: 3,
+    static let landscape = KeyboardMetrics(gap: 9, rowGap: 6, rowHeight: 34, sidePadding: 4, topBarHeight: 38,
+                                           topPadding: 4, composerHeight: 44, keyCornerRadius: 6, bottomPadding: 4,
                                            smallKeyWidth: 60, letterFont: 20)
 
     static func current(width: CGFloat, height: CGFloat) -> KeyboardMetrics {
@@ -71,7 +71,7 @@ struct KeyboardView: View {
         .background(model.cursorMode ? KeyboardPalette.cursorBackground(scheme) : KeyboardPalette.background(scheme))
         .coordinateSpace(name: "keyboard")
         .onPreferenceChange(KeyFramesKey.self) { keyFrames = $0 }
-        .overlay(KeyTouchView(model: model, frames: keyFrames))
+        .overlay(KeyTouchView(model: model, frames: keyFrames, bias: model.letterBias))
         .overlay(alignment: .topLeading) {
             if let preview = model.keyPreview, model.popup == nil, let f = keyFrames[preview.key] {
                 KeyPreviewView(glyph: preview.glyph, keyFrame: f, metrics: m)
@@ -289,7 +289,10 @@ struct KeyView: View {
         return KeyboardPalette.key(scheme)
     }
 
-    private var labelColor: Color { returnBlue ? .white : KeyboardPalette.text(scheme) }
+    private var labelColor: Color {
+        if key == .ret, model.returnKeyDisabled { return KeyboardPalette.secondaryText(scheme).opacity(0.6) }
+        return returnBlue ? .white : KeyboardPalette.text(scheme)
+    }
 
     @ViewBuilder
     private var label: some View {
@@ -359,7 +362,40 @@ struct TopBar: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            if model.translateMode {
+            if model.emojiSearchActive {
+                // ← | query | results… ; typing goes into the query
+                squareButton(systemName: "chevron.left", size: 14) { model.endEmojiSearch(backToEmoji: true) }
+                HStack(spacing: 4) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 13)).foregroundStyle(.secondary)
+                    Text(model.emojiQuery.isEmpty ? "Search Emoji" : model.emojiQuery)
+                        .font(.system(size: 15))
+                        .foregroundStyle(model.emojiQuery.isEmpty ? .secondary : KeyboardPalette.text(scheme))
+                        .lineLimit(1)
+                    if !model.emojiQuery.isEmpty {
+                        Rectangle().fill(Color.accentColor).frame(width: 2, height: 16)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .frame(minWidth: 110, maxWidth: model.emojiResults.isEmpty ? .infinity : 150, alignment: .leading)
+                .frame(height: 34)
+                .background(RoundedRectangle(cornerRadius: corner, style: .continuous).fill(KeyboardPalette.key(scheme)))
+                if !model.emojiResults.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 2) {
+                            ForEach(model.emojiResults, id: \.self) { e in
+                                Button { model.insertEmoji(e) } label: {
+                                    Text(e).font(.system(size: 26)).frame(width: 36, height: 36)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                } else if !model.emojiQuery.isEmpty {
+                    Text("No emoji found").font(.system(size: 12)).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                squareButton(systemName: "xmark", size: 13) { model.endEmojiSearch(backToEmoji: false) }
+            } else if model.translateMode {
                 // × | translation field | ↑
                 squareButton(systemName: "xmark", size: 13, action: model.exitTranslateMode)
                 TranslationField(model: model)
@@ -666,24 +702,51 @@ struct EmojiPanel: View {
 
     var body: some View {
         VStack(spacing: 6) {
-            ScrollView(.vertical, showsIndicators: false) {
-                LazyVGrid(columns: columns, spacing: 4) {
-                    ForEach(currentEmoji, id: \.self) { e in
-                        Button { model.insertEmoji(e) } label: {
-                            Text(e)
-                                .font(.system(size: 30))
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 38)
+            ZStack(alignment: .top) {
+                ScrollView(.vertical, showsIndicators: false) {
+                    LazyVGrid(columns: columns, spacing: 4) {
+                        ForEach(currentEmoji, id: \.self) { e in
+                            EmojiCell(emoji: e, model: model)
+                        }
+                    }
+                    .padding(.horizontal, 6)
+                }
+                .id(model.emojiCategory)
+
+                if let variants = model.emojiVariants {
+                    // Skin-tone picker, like the system's touch-and-hold row.
+                    HStack(spacing: 2) {
+                        ForEach(variants, id: \.self) { v in
+                            Button { model.insertEmoji(v) } label: {
+                                Text(v).font(.system(size: 30)).frame(width: 44, height: 44)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        Button { model.emojiVariants = nil } label: {
+                            Image(systemName: "xmark").font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(.secondary).frame(width: 30, height: 44)
                         }
                         .buttonStyle(.plain)
                     }
+                    .padding(4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(KeyboardPalette.key(scheme))
+                            .shadow(color: .black.opacity(0.25), radius: 6, y: 2)
+                    )
+                    .padding(.top, 4)
                 }
-                .padding(.horizontal, 6)
             }
-            .id(model.emojiCategory)
 
             HStack(spacing: 4) {
                 KeyView(key: .letters, model: model, width: 48, height: 36)
+                Button(action: model.startEmojiSearch) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 34, height: 30)
+                }
+                .buttonStyle(.plain)
                 if !model.settings.recentEmoji.isEmpty {
                     tab("recent", symbol: "clock")
                 }
@@ -703,7 +766,7 @@ struct EmojiPanel: View {
     }
 
     private func tab(_ id: String, symbol: String) -> some View {
-        Button { model.emojiCategory = id } label: {
+        Button { model.emojiCategory = id; model.emojiVariants = nil } label: {
             Image(systemName: symbol)
                 .font(.system(size: 14, weight: .medium))
                 .foregroundStyle(model.emojiCategory == id ? KeyboardPalette.text(scheme) : .secondary)
@@ -714,6 +777,30 @@ struct EmojiPanel: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// One emoji in the grid: a quick press inserts it, holding ≥ 0.4 s opens
+/// the skin-tone variants (the two are told apart by whether the long press
+/// fired before the finger lifted, so a hold never also inserts).
+struct EmojiCell: View {
+    let emoji: String
+    @ObservedObject var model: KeyboardModel
+    @State private var longPressed = false
+
+    var body: some View {
+        Text(emoji)
+            .font(.system(size: 30))
+            .frame(maxWidth: .infinity)
+            .frame(height: 38)
+            .contentShape(Rectangle())
+            .onLongPressGesture(minimumDuration: 0.4, maximumDistance: 24, perform: {
+                longPressed = true
+                model.showEmojiVariants(emoji)
+            }, onPressingChanged: { pressing in
+                if pressing { longPressed = false }
+                else if !longPressed { model.insertEmoji(emoji) }
+            })
     }
 }
 

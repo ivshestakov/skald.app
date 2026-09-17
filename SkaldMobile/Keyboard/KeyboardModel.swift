@@ -9,8 +9,11 @@ protocol KeyboardHost: AnyObject {
     var needsInputModeSwitchKey: Bool { get }
     func advanceToNextInputMode()
     func playClick()
+    func playClick(_ kind: KeyClick)
     func playHaptic()
 }
+
+enum KeyClick { case letter, modifier, delete }
 
 enum ShiftState { case off, on, caps }
 
@@ -120,6 +123,16 @@ final class KeyboardModel: ObservableObject {
     private var previewTask: Task<Void, Never>?
 
     @Published var emojiCategory: String = ""
+    /// Emoji search: the top bar becomes a search field, keys type into it.
+    @Published var emojiSearchActive = false
+    @Published var emojiQuery = ""
+    @Published var emojiResults: [String] = []
+    /// Skin-tone variants shown for a long-pressed emoji.
+    @Published var emojiVariants: [String]?
+    /// Next-letter likelihood for the word being typed (dynamic hit targets).
+    @Published var letterBias: [Character: Double] = [:]
+    /// Return key disabled: enablesReturnKeyAutomatically with an empty field.
+    @Published var returnKeyDisabled = false
     /// Texts sent for translation this session, newest first (max 5), for
     /// swiping through them in the translation field.
     private var sentHistory: [String] = []
@@ -136,6 +149,9 @@ final class KeyboardModel: ObservableObject {
         let s = SkaldSettings.shared
         direction = LanguagePair(source: s.primaryLanguage, target: s.secondaryLanguage)
         emojiCategory = s.recentEmoji.isEmpty ? (EmojiData.categories.first?.id ?? "") : "recent"
+        if let last = s.lastKeyboardLanguage, let i = s.keyboardLanguages.firstIndex(of: last) {
+            languageIndex = i
+        }
         Autocorrect.shared.loadPersonal()
         Autocorrect.shared.preload(s.keyboardLanguages.first ?? s.primaryLanguage)
     }
@@ -153,7 +169,14 @@ final class KeyboardModel: ObservableObject {
 
     func nextLanguage() {
         languageIndex = (languageIndex + 1) % keyboardLanguages.count
+        rememberLanguage()
         Autocorrect.shared.preload(currentLanguage)
+    }
+
+    /// Persist a user-initiated layout choice (not the ASCII-field override).
+    private func rememberLanguage() {
+        guard languageIndexBeforeASCII == nil else { return }
+        settings.lastKeyboardLanguage = currentLanguage
     }
 
     /// Swipe on the space bar: left = next layout, right = previous.
@@ -161,6 +184,7 @@ final class KeyboardModel: ObservableObject {
         let n = keyboardLanguages.count
         guard n > 1 else { return }
         languageIndex = ((languageIndex + delta) % n + n) % n
+        rememberLanguage()
         pressedKeys.remove(.space)
         if settings.hapticsEnabled { host?.playHaptic() }
         Autocorrect.shared.preload(currentLanguage)
@@ -186,7 +210,7 @@ final class KeyboardModel: ObservableObject {
 
     /// Programmatic key press (emoji panel's ABC/backspace, tests).
     func tap(_ key: Key) {
-        host?.playClick()
+        host?.playClick(clickKind(for: key))
         if settings.hapticsEnabled { host?.playHaptic() }
         perform(key)
     }
@@ -210,6 +234,11 @@ final class KeyboardModel: ObservableObject {
         case .space:
             tapSpace()
         case .ret:
+            if emojiSearchActive {
+                if let first = emojiResults.first { insertEmoji(first) }
+                return
+            }
+            guard !returnKeyDisabled else { return }
             if translateMode {
                 if composer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { translate() } else { commitComposer() }
             } else {
@@ -232,8 +261,16 @@ final class KeyboardModel: ObservableObject {
 
     private var pageBeforeGlide: KeyboardPage?
 
+    private func clickKind(for key: Key) -> KeyClick {
+        switch key {
+        case .char, .space: return .letter
+        case .backspace:    return .delete
+        default:            return .modifier
+        }
+    }
+
     func keyDown(_ key: Key) {
-        host?.playClick()
+        host?.playClick(clickKind(for: key))
         if settings.hapticsEnabled { host?.playHaptic() }
         pressedKeys.insert(key)
         switch key {
@@ -370,7 +407,7 @@ final class KeyboardModel: ObservableObject {
 
     private func insert(_ raw: String) {
         var s = raw
-        if page == .letters, shift != .off {
+        if page == .letters, shift != .off, !emojiSearchActive {
             s = s.uppercased()
             if shift == .on { shift = .off; shiftIsAuto = false }
         }
@@ -399,7 +436,7 @@ final class KeyboardModel: ObservableObject {
     /// Smart Punctuation like the system's: curly quotes by language, an
     /// apostrophe that opens or closes by context, and "--" → em dash.
     private func smartPunctuation(for raw: String) -> SmartPunct? {
-        guard !correctionsDisabled, page != .emoji, let proxy = host?.proxy else { return nil }
+        guard !correctionsDisabled, page != .emoji, !emojiSearchActive, let proxy = host?.proxy else { return nil }
         let before = textBeforeCaret
         let opening = before.isEmpty || before.last!.isWhitespace || before.last!.isNewline || "([{«“‘".contains(before.last!)
         switch raw {
@@ -496,7 +533,7 @@ final class KeyboardModel: ObservableObject {
     @discardableResult
     private func autocorrectCurrentWord(separator: String) -> Bool {
         lastAutocorrect = nil
-        guard page == .letters, !correctionsDisabled else { return false }
+        guard page == .letters, !correctionsDisabled, !emojiSearchActive else { return false }
         let word = currentWord
         guard !word.isEmpty else { return false }
         if let g = retypeGuard {
@@ -593,8 +630,10 @@ final class KeyboardModel: ObservableObject {
     /// bar can show it highlighted (native layout: "typed" · fix · other).
     private func updateSuggestions() {
         guard settings.suggestionsEnabled || settings.autocorrectEnabled, !correctionsDisabled, page == .letters,
-              status == .idle || translateMode else {
-            suggestions = []; applyIndex = nil; pendingWord = nil; pendingFix = nil; return
+              !emojiSearchActive, status == .idle || translateMode else {
+            suggestions = []; applyIndex = nil; pendingWord = nil; pendingFix = nil
+            if !letterBias.isEmpty { letterBias = [:] }
+            return
         }
         let before = currentWord
         let after = wordAfterCaret
@@ -610,8 +649,12 @@ final class KeyboardModel: ObservableObject {
         let showBar = settings.suggestionsEnabled
         suggestionGeneration += 1
         let gen = suggestionGeneration
+        let wantBias = after.isEmpty
         DispatchQueue.global(qos: .userInteractive).async { [weak self] in
             let fix = wantFix ? Autocorrect.shared.correction(for: word, prev: prev, language: language, layout: layout, touches: touches) : nil
+            let bias: [Character: Double] = wantBias
+                ? Autocorrect.shared.nextLetterDistribution(prefix: word, prev: word.isEmpty ? prevForPrediction : nil, language: language)
+                : [:]
             var next: [String] = []
             var apply: Int? = nil
             if showBar {
@@ -642,6 +685,7 @@ final class KeyboardModel: ObservableObject {
                 if wantFix { self.pendingWord = word; self.pendingFix = fix } else { self.pendingWord = nil; self.pendingFix = nil }
                 if next != self.suggestions { self.suggestions = next }
                 if apply != self.applyIndex { self.applyIndex = apply }
+                if bias != self.letterBias { self.letterBias = bias }
             }
         }
     }
@@ -659,6 +703,7 @@ final class KeyboardModel: ObservableObject {
     /// word becomes ". ", and space after punctuation typed on the numbers
     /// or symbols page jumps back to the letters page.
     private func tapSpace() {
+        if emojiSearchActive { insertRaw(" "); return }
         let now = Date()
         // Consecutive space presses (nothing typed in between) — the system
         // keyboard doesn't time them either, it only requires a word before.
@@ -699,6 +744,11 @@ final class KeyboardModel: ObservableObject {
     /// Inserts text where typing currently goes: the composer in translate
     /// mode, the document otherwise.
     private func insertRaw(_ s: String) {
+        if emojiSearchActive {
+            emojiQuery += s
+            emojiResults = EmojiIndex.shared.search(emojiQuery)
+            return
+        }
         let base = textBeforeCaret
         lastEditAt = Date()
         if translateMode {
@@ -721,13 +771,62 @@ final class KeyboardModel: ObservableObject {
     }
 
     func insertEmoji(_ e: String) {
-        host?.playClick()
+        host?.playClick(.letter)
         if settings.hapticsEnabled { host?.playHaptic() }
         settings.recordEmoji(e)
+        emojiVariants = nil
+        if emojiSearchActive {
+            // Results go into the document, not the query.
+            let base = textBeforeCaret
+            lastEditAt = Date()
+            if translateMode { composer += e; schedulePreview() } else { host?.proxy.insertText(e); clearUndoIfEdited() }
+            afterLocalEdit(before: base + e)
+            return
+        }
         insertRaw(e)
     }
 
+    private var languageIndexBeforeSearch: Int?
+
+    func startEmojiSearch() {
+        host?.playClick(.modifier)
+        emojiSearchActive = true
+        emojiQuery = ""; emojiResults = []
+        emojiVariants = nil
+        page = .letters
+        // Emoji names are English: search on a Latin layout, lowercase.
+        if LetterLayout.forLanguage(currentLanguage) != .latin,
+           let latin = keyboardLanguages.firstIndex(where: { LetterLayout.forLanguage($0) == .latin }) {
+            languageIndexBeforeSearch = languageIndex
+            languageIndex = latin
+        }
+        shift = .off; shiftIsAuto = false
+        hideKeyPreview()
+    }
+
+    func endEmojiSearch(backToEmoji: Bool) {
+        host?.playClick(.modifier)
+        emojiSearchActive = false
+        emojiQuery = ""; emojiResults = []
+        if let back = languageIndexBeforeSearch, back < keyboardLanguages.count { languageIndex = back }
+        languageIndexBeforeSearch = nil
+        page = backToEmoji ? .emoji : .letters
+        textDidChange()
+    }
+
+    func showEmojiVariants(_ e: String) {
+        let v = EmojiIndex.shared.variants(of: e)
+        guard !v.isEmpty else { return }
+        if settings.hapticsEnabled { host?.playHaptic() }
+        emojiVariants = [e] + v
+    }
+
     private func backspaceOnce() {
+        if emojiSearchActive {
+            if !emojiQuery.isEmpty { emojiQuery.removeLast() }
+            emojiResults = EmojiIndex.shared.search(emojiQuery)
+            return
+        }
         lastEditAt = Date()
         if !touchTrail.isEmpty { touchTrail.removeLast() }
         if let ac = lastAutocorrect {
@@ -764,7 +863,7 @@ final class KeyboardModel: ObservableObject {
         repeatTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                self.host?.playClick()
+                self.host?.playClick(.delete)
                 if self.settings.hapticsEnabled { self.host?.playHaptic() }
                 self.backspaceCount += 1
                 if self.backspaceCount > 20 {
@@ -854,6 +953,8 @@ final class KeyboardModel: ObservableObject {
         let hasText = !(proxy.documentContextBeforeInput ?? "").isEmpty || !(proxy.documentContextAfterInput ?? "").isEmpty
         let tinted = tintTypes.contains(proxy.returnKeyType ?? .default) && (!(proxy.enablesReturnKeyAutomatically ?? false) || hasText)
         if tinted != returnKeyTinted { returnKeyTinted = tinted }
+        let disabled = (proxy.enablesReturnKeyAutomatically ?? false) && !hasText && !translateMode
+        if disabled != returnKeyDisabled { returnKeyDisabled = disabled }
     }
 
     /// When we last edited the document ourselves. Right after a burst of
@@ -885,7 +986,7 @@ final class KeyboardModel: ObservableObject {
     }
 
     private func updateAutoShift(before: String) {
-        guard page == .letters, shift != .caps else { return }
+        guard page == .letters, shift != .caps, !emojiSearchActive else { return }
         let capType = host?.proxy.autocapitalizationType ?? .sentences
         if capType == .none {
             if shift == .on, shiftIsAuto { shift = .off }
@@ -959,7 +1060,10 @@ final class KeyboardModel: ObservableObject {
     // MARK: - Long-press popups
 
     func showAlternates(for glyph: String, keyFrame: CGRect) -> Bool {
-        let alts = KeyAlternates.alternates(for: glyph)
+        var alts = KeyAlternates.alternates(for: glyph)
+        if glyph == ".", [.URL, .emailAddress, .webSearch].contains(host?.proxy.keyboardType ?? .default) {
+            alts = [".com", ".net", ".org", ".ua", ".ru", ".edu"]
+        }
         guard !alts.isEmpty else { return false }
         let cased = page == .letters && shift != .off
         let options = ([glyph] + alts).map { cased ? $0.uppercased() : $0 }
@@ -997,6 +1101,7 @@ final class KeyboardModel: ObservableObject {
             if page == .letters, shift == .on { shift = .off; shiftIsAuto = false }
         case .languages:
             languageIndex = p.selected
+            rememberLanguage()
             page = .letters
         }
     }
@@ -1119,6 +1224,7 @@ final class KeyboardModel: ObservableObject {
         }
         settings.keyboardLanguages = list
         languageIndex = min(languageIndex, list.count - 1)
+        rememberLanguage()
         objectWillChange.send()
         Autocorrect.shared.preload(currentLanguage)
     }
