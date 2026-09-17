@@ -89,7 +89,12 @@ Ivan wants a mobile version as a **translating keyboard**. It lives in
   tap-on-word suggestions, UIKit multi-touch layer with glide and space
   trackpad, host-field traits (see SkaldMobile/README.md).
   TestFlight: app "Skald Translator" (6812791271), upload via
-  `SkaldMobile/release-ios.sh` (manual signing + altool). Not yet run on a device; Apple on-device engine unverified
+  `SkaldMobile/release-ios.sh` (manual signing + altool).
+- **Parity with the system keyboard is the north star.** The audit
+  `SkaldMobile/docs/native-parity.html` (+ `docs/research/*.md`, 2026-09-17)
+  compares native iOS behaviour with Skald item by item, lists what an
+  extension can never do, and holds the prioritised P0–P3 plan. Consult it
+  before changing keyboard behaviour. Not yet run on a device; Apple on-device engine unverified
   inside the extension. Ivan's goal: keep only the English system keyboard
   and let Skald replace the RU/UK ones, so it must look identical to iOS 27.
 
