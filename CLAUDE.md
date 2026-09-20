@@ -67,36 +67,56 @@ TranslatorApp/
     └── Updater.swift               — Sparkle SPUStandardUpdaterController wrapper
 ```
 
-## iOS keyboard (SkaldMobile/) — added 2026-09-15
+## iOS keyboard (SkaldMobile/) — added 2026-09-15, status 2026-09-21
 
-Ivan wants a mobile version as a **translating keyboard**. It lives in
-`SkaldMobile/` (xcodegen project, `project.yml` is the source of truth;
-`Skald.xcodeproj` and `build/` are git-ignored). See
-`SkaldMobile/README.md` for structure, build steps and known gaps.
+Ivan wants a mobile version as a **translating keyboard** that replaces the
+system RU/UK keyboards (he keeps only English), so it must feel identical
+to the iOS 27 system keyboard. Code lives in `SkaldMobile/` (xcodegen
+project; `project.yml` is the source of truth; `Skald.xcodeproj`, `build/`
+and `.last-build` are git-ignored). `SkaldMobile/README.md` has the
+feature list, build steps and gotchas.
 
 - App `com.ivshestakov.skald.ios` + extension `.ios.keyboard`, App Group
-  `group.com.ivshestakov.skald`, min iOS 18, automatic signing, team
-  `975ZZPJQNB`.
-- `Shared/` is a platform-neutral copy of the Mac app's Language / Engine
-  / Tone / Settings / Translator code (async). Claude prompt and tone
-  directives are duplicated — change both when editing one.
-- Status (2026-09-16): MVP verified in the iPhone 17 Pro simulator —
-  typing, RU/UK/EN layouts + language key, long-press alternates, emoji
-  panel, Translate *mode* (composer + live preview, Return inserts), Undo,
-  light/dark styling matched to the system keyboard (iOS 26.4 sim + iOS 27
-  photos), double-space period, punctuation→letters, key pop-up, haptics,
-  frequency-dictionary + bigram autocorrect, next-word prediction,
-  tap-on-word suggestions, UIKit multi-touch layer with glide and space
-  trackpad, host-field traits (see SkaldMobile/README.md).
-  TestFlight: app "Skald Translator" (6812791271), upload via
-  `SkaldMobile/release-ios.sh` (manual signing + altool).
-- **Parity with the system keyboard is the north star.** The audit
-  `SkaldMobile/docs/native-parity.html` (+ `docs/research/*.md`, 2026-09-17)
-  compares native iOS behaviour with Skald item by item, lists what an
-  extension can never do, and holds the prioritised P0–P3 plan. Consult it
-  before changing keyboard behaviour. Not yet run on a device; Apple on-device engine unverified
-  inside the extension. Ivan's goal: keep only the English system keyboard
-  and let Skald replace the RU/UK ones, so it must look identical to iOS 27.
+  `group.com.ivshestakov.skald`, min iOS 18, team `975ZZPJQNB`. Release
+  signing is **manual** (profiles "Skald iOS App Store" / "Skald Keyboard
+  iOS App Store", Apple Distribution) because Xcode's automatic signing
+  rejects the ASC API key; `SkaldMobile/release-ios.sh` archives, exports
+  and uploads with altool (no key path on the command line, so it can be
+  run from Claude Code). Build number auto-increments (`.last-build`).
+- App Store Connect (Ivan's personal team, NOT Andrii's Lazy Skipper team):
+  app **Skald Translator**, Apple ID 6812791271. TestFlight internal group
+  "Internal" (ivshestakov@gmail.com, gets every build automatically);
+  external group "Friends" (veklichsvetlana@gmail.com) is attached to
+  **build 7, still WAITING_FOR_REVIEW since 2026-09-16** — consider
+  cancelling and resubmitting the latest build. ASC helper script:
+  scratchpad `asc.py` (JWT via openssl; recreate if the scratchpad is gone).
+- `Shared/` is a platform-neutral copy of the Mac app's Language / Engine /
+  Tone / Settings / Translator code. Claude prompt and tone directives are
+  duplicated — change both when editing one.
+- **North star: parity with the system keyboard.** The audit
+  `SkaldMobile/docs/native-parity.html` (published at
+  https://claude.ai/artifact/SCbUBVQrmV7trrUEofwqfB) + `docs/research/*.md`
+  compares native behaviour with Skald item by item, lists what an
+  extension can never do, and holds the P0–P3 plan. **P0, P1, P2 are done**
+  (builds 13–15, 2026-09-17). Open: **P3** — QuickPath slide-to-type (Apple
+  has it for RU, not UK) and one-handed mode; plus: run on a real device,
+  verify the Apple on-device engine inside the extension, App Store
+  listing (screenshots, privacy labels), merge `ios/keyboard-mvp` into
+  `main` (branch also carries the 0.4.1 Mac commit; no PR yet).
+- Dev loop (simulator "iPhone 17 Pro", iOS 26.4 runtime — no iOS 27 runtime
+  installed): `xcodegen generate` → `xcodebuild … CODE_SIGNING_ALLOWED=NO`
+  → `simctl install` → kill the cached extension process
+  (`launchctl list | grep skald.ios.keyboard` → `/bin/kill -TERM` via
+  `simctl spawn booted`) → relaunch the app; the "Try it" field on the
+  Setup tab is the test field. Simulator must have "Connect Hardware
+  Keyboard" off. In the unsigned simulator build the extension can't read
+  App Group settings (always starts with Google).
+- Behaviour decisions on file: native backspace semantics after autocorrect
+  (delete the separator, re-offer the typed word quoted; retyping the same
+  word is not corrected again); translation only on ↑, never live; controls
+  on the right of the suggestion strip; style only with Claude, always on;
+  haptics and key sounds default on (own toggles — the system settings are
+  unreadable from an extension).
 
 ## Codesigning identity
 
