@@ -1,0 +1,169 @@
+import AudioToolbox
+import Combine
+import SwiftUI
+import UIKit
+
+/// Container view that lets UIKit play the standard key click.
+final class ClickableInputView: UIInputView, UIInputViewAudioFeedback {
+    var enableInputClicksWhenVisible: Bool { true }
+}
+
+final class KeyboardViewController: UIInputViewController, KeyboardHost {
+
+    private let model = KeyboardModel()
+    private var hosting: UIHostingController<KeyboardView>?
+    private var heightConstraint: NSLayoutConstraint?
+    private var cancellables: Set<AnyCancellable> = []
+
+    private var keyboardHeight: CGFloat { model.metrics.totalHeight(translateMode: false) }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // Swap in an input view that plays the system key click; the system
+        // still owns its width, we only pin the height below.
+        inputView = ClickableInputView(frame: .zero, inputViewStyle: .keyboard)
+        model.host = self
+        AppleTranslator.hostView = view
+
+        let hc = UIHostingController(rootView: KeyboardView(model: model))
+        hc.view.backgroundColor = .clear
+        addChild(hc)
+        view.addSubview(hc.view)
+        hc.view.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            hc.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            hc.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            hc.view.topAnchor.constraint(equalTo: view.topAnchor),
+            hc.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        hc.didMove(toParent: self)
+        hosting = hc
+
+        // The user's Text Replacement shortcuts (Settings → Keyboard).
+        requestSupplementaryLexicon { [weak self] lexicon in
+            var map: [String: String] = [:]
+            var words: Set<String> = []
+            for e in lexicon.entries {
+                let input = e.userInput.trimmingCharacters(in: .whitespaces)
+                // Contact names come through as word → word; a Text Replacement
+                // with a blank shortcut is the user's "never correct this".
+                if input.isEmpty || input.lowercased() == e.documentText.lowercased() {
+                    for w in e.documentText.split(separator: " ") where w.count >= 2 { words.insert(w.lowercased()) }
+                } else {
+                    map[input.lowercased()] = e.documentText
+                }
+            }
+            DispatchQueue.main.async {
+                self?.model.lexicon = map
+                Autocorrect.shared.setExternalWords(words)
+            }
+        }
+
+        // Portrait/landscape presets change the height.
+        model.$metrics.removeDuplicates().map { _ in () }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, let h = self.heightConstraint else { return }
+                h.constant = self.keyboardHeight
+                UIView.animate(withDuration: 0.2) { self.view.superview?.layoutIfNeeded() }
+            }
+            .store(in: &cancellables)
+    }
+
+    override func updateViewConstraints() {
+        super.updateViewConstraints()
+        guard heightConstraint == nil, view.window != nil else { return }
+        let h = view.heightAnchor.constraint(equalToConstant: keyboardHeight)
+        h.priority = .init(999)
+        h.isActive = true
+        heightConstraint = h
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        applyAppearance()
+        updateMetrics()
+        model.textDidChange(fromHost: true)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        updateMetrics()
+    }
+
+    /// Portrait vs landscape presets, decided from the screen the keyboard is on.
+    private func updateMetrics() {
+        let b = view.window?.screen.bounds ?? UIScreen.main.bounds
+        let m = KeyboardMetrics.current(width: b.width, height: b.height)
+        if m != model.metrics { model.metrics = m }
+    }
+
+    override func textDidChange(_ textInput: UITextInput?) {
+        super.textDidChange(textInput)
+        applyAppearance()
+        model.textDidChange(fromHost: true)
+    }
+
+    /// The caret moved (user tapped into the text): refresh the word-at-caret
+    /// suggestions.
+    override func selectionDidChange(_ textInput: UITextInput?) {
+        super.selectionDidChange(textInput)
+        model.textDidChange(fromHost: true)
+    }
+
+    private func applyAppearance() {
+        // Respect the host field's requested keyboard appearance.
+        switch textDocumentProxy.keyboardAppearance {
+        case .dark:  overrideUserInterfaceStyle = .dark
+        case .light: overrideUserInterfaceStyle = .light
+        default:     overrideUserInterfaceStyle = .unspecified
+        }
+    }
+
+    // MARK: KeyboardHost
+
+    var proxy: UITextDocumentProxy { textDocumentProxy }
+
+    /// The system keyboard uses three samples: letters, modifiers, delete.
+    /// They ship in /System/Library/Audio/UISounds; we load them by file and
+    /// fall back to the generic input click if unavailable. Our own "Key
+    /// sounds" switch stands in for the system setting we cannot read.
+    private lazy var clickSounds: [KeyClick: SystemSoundID] = {
+        var out: [KeyClick: SystemSoundID] = [:]
+        let files: [KeyClick: String] = [.letter: "key_press_click", .modifier: "key_press_modifier", .delete: "key_press_delete"]
+        for (kind, name) in files {
+            let url = URL(fileURLWithPath: "/System/Library/Audio/UISounds/\(name).caf")
+            var id: SystemSoundID = 0
+            if FileManager.default.fileExists(atPath: url.path),
+               AudioServicesCreateSystemSoundID(url as CFURL, &id) == kAudioServicesNoError {
+                out[kind] = id
+            }
+        }
+        return out
+    }()
+
+    func playClick() { playClick(.letter) }
+
+    func playClick(_ kind: KeyClick) {
+        guard model.settings.keySoundsEnabled else { return }
+        if let id = clickSounds[kind] {
+            AudioServicesPlaySystemSound(id)
+        } else {
+            UIDevice.current.playInputClick()
+        }
+    }
+
+    // UIFeedbackGenerator only fires inside a keyboard extension when the
+    // user granted Full Access; without it the call is a silent no-op.
+    private lazy var haptic: UIImpactFeedbackGenerator = {
+        let g = UIImpactFeedbackGenerator(style: .light)
+        g.prepare()
+        return g
+    }()
+
+    func playHaptic() {
+        guard hasFullAccess else { return }
+        haptic.impactOccurred(intensity: 0.8)
+        haptic.prepare()
+    }
+}

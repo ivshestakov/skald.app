@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>method</key>
+    <string>app-store-connect</string>
+    <key>destination</key>
+    <string>export</string>
+    <key>signingStyle</key>
+    <string>manual</string>
+    <key>signingCertificate</key>
+    <string>Apple Distribution</string>
+    <key>teamID</key>
+    <string>975ZZPJQNB</string>
+    <key>provisioningProfiles</key>
+    <dict>
+        <key>com.ivshestakov.skald.ios</key>
+        <string>Skald iOS App Store</string>
+        <key>com.ivshestakov.skald.ios.keyboard</key>
+        <string>Skald Keyboard iOS App Store</string>
+    </dict>
+    <key>uploadSymbols</key>
+    <true/>
+    <key>manageAppVersionAndBuildNumber</key>
+    <false/>
+</dict>
+</plist>

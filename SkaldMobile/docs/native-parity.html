@@ -1,0 +1,364 @@
+<title>Skald Parity Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#E4E6EC; --surface:#FFFFFF; --surface-2:#F3F4F7; --ink:#15171C; --muted:#62656E; --line:#CDD0D8;
+  --accent:#0A5BD3; --accent-soft:#DCE8FB;
+  --good:#1F8A4C; --good-soft:#DDF3E5; --warn:#B8720F; --warn-soft:#FBEBD1; --bad:#B03A3A; --bad-soft:#F8DEDE; --cant:#7C7F88; --cant-soft:#E6E7EB; --plus:#5B3FBF; --plus-soft:#E6E0F8;
+  --key-shadow:0 1px 0 rgba(0,0,0,.18);
+  --mono:"Geist Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"Geist",-apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#1D1D20; --surface:#2E2F33; --surface-2:#26272B; --ink:#F1F2F5; --muted:#A6A8B0; --line:#3E4046;
+    --accent:#5AA3FF; --accent-soft:#1C2E4A;
+    --good:#4CC17A; --good-soft:#1B3325; --warn:#E0A040; --warn-soft:#3A2C14; --bad:#E36B6B; --bad-soft:#3D1F1F; --cant:#9A9CA4; --cant-soft:#36373C; --plus:#A98BFF; --plus-soft:#2C2545;
+    --key-shadow:0 1px 0 rgba(0,0,0,.6);
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#1D1D20; --surface:#2E2F33; --surface-2:#26272B; --ink:#F1F2F5; --muted:#A6A8B0; --line:#3E4046;
+  --accent:#5AA3FF; --accent-soft:#1C2E4A;
+  --good:#4CC17A; --good-soft:#1B3325; --warn:#E0A040; --warn-soft:#3A2C14; --bad:#E36B6B; --bad-soft:#3D1F1F; --cant:#9A9CA4; --cant-soft:#36373C; --plus:#A98BFF; --plus-soft:#2C2545;
+  --key-shadow:0 1px 0 rgba(0,0,0,.6);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:15.5px;line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:1040px;margin:0 auto;padding:40px 24px 96px}
+header{display:grid;grid-template-columns:1fr auto;gap:24px;align-items:end;margin-bottom:28px}
+h1{font-size:34px;line-height:1.1;margin:0 0 10px;font-weight:700;letter-spacing:-.02em;text-wrap:balance}
+.sub{color:var(--muted);max-width:62ch;margin:0}
+.meta{font-family:var(--mono);font-size:12px;color:var(--muted);text-align:right;line-height:1.7}
+h2{font-size:22px;letter-spacing:-.01em;margin:56px 0 6px;font-weight:650;text-wrap:balance;scroll-margin-top:80px}
+h2 .n{font-family:var(--mono);font-size:12px;color:var(--muted);font-weight:500;margin-right:10px;letter-spacing:.06em}
+h3{font-size:16px;margin:26px 0 8px;font-weight:600}
+p{max-width:72ch}
+.lede{color:var(--muted);margin:0 0 18px;max-width:72ch}
+nav.toc{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--ground) 88%,transparent);backdrop-filter:blur(10px);margin:0 -24px 8px;padding:10px 24px;border-bottom:1px solid var(--line);display:flex;gap:6px;flex-wrap:wrap}
+nav.toc a{font-family:var(--mono);font-size:11.5px;color:var(--ink);background:var(--surface);border-radius:6px;padding:4px 9px;box-shadow:var(--key-shadow);letter-spacing:.02em}
+nav.toc a:hover{text-decoration:none;background:var(--accent-soft)}
+.card{background:var(--surface);border-radius:12px;padding:20px 22px;box-shadow:var(--key-shadow)}
+.summary{display:grid;grid-template-columns:1.25fr 1fr;gap:18px;margin-top:22px}
+@media (max-width:820px){.summary{grid-template-columns:1fr}header{grid-template-columns:1fr}.meta{text-align:left}}
+.summary ol{margin:8px 0 0;padding-left:20px}.summary li{margin:0 0 10px}
+.score{width:100%;border-collapse:collapse;font-size:13px}
+.score th{text-align:left;font-weight:500;color:var(--muted);font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding:0 0 8px}
+.score td{padding:6px 0;border-top:1px solid var(--line);vertical-align:middle}
+.score td:first-child{width:38%;padding-right:10px}
+.bar{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--surface-2)}
+.bar span{display:block;height:100%}
+.bar .m{background:var(--good)}.bar .g{background:var(--warn)}.bar .c{background:var(--cant)}.bar .p{background:var(--plus)}
+.score .nums{font-family:var(--mono);font-size:11.5px;color:var(--muted);white-space:nowrap;padding-left:10px;font-variant-numeric:tabular-nums}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin-top:10px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.tblwrap{overflow-x:auto;margin:10px 0 4px;border-radius:12px;background:var(--surface);box-shadow:var(--key-shadow)}
+table.cmp{width:100%;border-collapse:collapse;font-size:13.5px;min-width:760px}
+table.cmp th{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500;text-align:left;padding:12px 14px 8px;border-bottom:1px solid var(--line)}
+table.cmp td{padding:10px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+table.cmp tr:last-child td{border-bottom:0}
+table.cmp td:nth-child(1){width:17%;font-weight:600}
+table.cmp td:nth-child(2),table.cmp td:nth-child(3){width:29%}
+table.cmp td:nth-child(4){width:11%;white-space:nowrap}
+table.cmp td:nth-child(5){width:14%;color:var(--muted)}
+.v{display:inline-block;font-family:var(--mono);font-size:11px;letter-spacing:.04em;padding:3px 8px 3px 7px;border-radius:6px;background:var(--surface-2);box-shadow:var(--key-shadow);white-space:nowrap}
+.v::before{content:"";display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:0}
+.v.match{background:var(--good-soft)}.v.match::before{background:var(--good)}
+.v.gap{background:var(--warn-soft)}.v.gap::before{background:var(--warn)}
+.v.cant{background:var(--cant-soft);color:var(--cant)}.v.cant::before{background:var(--cant)}
+.v.plus{background:var(--plus-soft)}.v.plus::before{background:var(--plus)}
+.v.na{background:transparent;box-shadow:none;color:var(--muted)}.v.na::before{background:var(--line)}
+code,.k{font-family:var(--mono);font-size:.92em;background:var(--surface-2);padding:1px 5px;border-radius:4px}
+.conf{font-family:var(--mono);font-size:10.5px;color:var(--muted);margin-left:4px}
+.verdict{margin:8px 0 0;color:var(--muted);font-size:14px;max-width:72ch}
+.road{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-top:14px}
+.road .card{padding:16px 18px}
+.road h3{margin:0 0 4px;font-size:15px;display:flex;align-items:center;gap:8px}
+.road .tag{font-family:var(--mono);font-size:11px;padding:2px 7px;border-radius:5px;background:var(--accent-soft);color:var(--accent)}
+.road .eff{font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:10px}
+.road ul{margin:0;padding-left:18px;font-size:13.5px}.road li{margin:0 0 7px}
+.callout{border-left:3px solid var(--accent);padding:10px 16px;background:var(--surface);border-radius:0 10px 10px 0;margin:16px 0;max-width:78ch}
+.callout.warn{border-color:var(--warn)}
+ul.plain{padding-left:18px;max-width:78ch}ul.plain li{margin:0 0 6px}
+.src{font-size:13px;color:var(--muted);columns:2;column-gap:28px;max-width:none}
+.src li{break-inside:avoid;margin:0 0 6px}
+@media (max-width:700px){.src{columns:1}}
+footer{margin-top:64px;color:var(--muted);font-size:12.5px;font-family:var(--mono)}
+@media (prefers-reduced-motion: no-preference){nav.toc a{transition:background .15s}}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<div class="wrap">
+<header>
+  <div>
+    <h1>Skald Parity Audit</h1>
+    <p class="sub">Нативная клавиатура iOS против Skald: касания и курсор, автозамена и её обучение, настройки, метрики. Что совпадает, что расходится, что расширению клавиатуры недоступно в принципе, и в каком порядке закрывать разрыв.</p>
+  </div>
+  <div class="meta">17 сентября 2026<br>iOS 17–26/27 · Skald сборка 12<br>4 отчёта · 12 000 слов источников</div>
+</header>
+
+<nav class="toc" aria-label="Разделы">
+  <a href="#sum">Итог</a><a href="#ceil">Потолок</a><a href="#a">A Клавиши</a><a href="#b">B Backspace</a><a href="#c">C Shift</a><a href="#d">D Пробел и курсор</a><a href="#e">E Долгое нажатие</a><a href="#f">F Автозамена</a><a href="#g">G Обучение</a><a href="#h">H Языки</a><a href="#i">I Поля</a><a href="#j">J Отклик и вид</a><a href="#l">L Чего нет</a><a href="#road">План</a><a href="#src">Метод</a>
+</nav>
+
+<section id="sum" class="summary">
+  <div class="card">
+    <h3 style="margin-top:0">Три вывода</h3>
+    <ol>
+      <li><strong>Механика уже близка.</strong> Коммит буквы по отпусканию, попап, скольжение с shift и 123, повтор backspace, точка по двойному пробелу, трекпад — всё есть; расхождения в цифрах (задержки, каденции) и в четырёх мелких правилах, которые правятся за день.</li>
+      <li><strong>Главный разрыв — не качество исправлений, а их подача.</strong> У Apple строка подсказок показывает, <em>что именно</em> сделает пробел, и это решение принято до нажатия. У нас исправление считается после пробела и не показано заранее. Отсюда ощущение задержки и «сюрпризов». Это правится без новой модели.</li>
+      <li><strong>Для русского и украинского Apple сама работает по старой схеме.</strong> Трансформер, встроенные предсказания, QuickPath для украинского и двуязычный ввод для кириллицы у Apple недоступны. Наша биграммная модель и переключение RU⇄UK⇄EN свайпом — уже больше, чем даёт система. Догонять надо в мелочах, а не в архитектуре.</li>
+    </ol>
+  </div>
+  <div class="card">
+    <h3 style="margin-top:0">Счёт по областям</h3>
+    <table class="score">
+      <tr><th>Область</th><th>Совпадение / разрыв / невозможно</th><th></th></tr>
+      <tr><td>A Клавиши и касания</td><td><div class="bar"><span class="m" style="width:44%"></span><span class="g" style="width:44%"></span><span class="c" style="width:12%"></span></div></td><td class="nums">4 · 4 · 1</td></tr>
+      <tr><td>B Backspace</td><td><div class="bar"><span class="m" style="width:50%"></span><span class="g" style="width:50%"></span></div></td><td class="nums">2 · 2 · 0</td></tr>
+      <tr><td>C Shift и регистр</td><td><div class="bar"><span class="m" style="width:60%"></span><span class="g" style="width:40%"></span></div></td><td class="nums">3 · 2 · 0</td></tr>
+      <tr><td>D Пробел и курсор</td><td><div class="bar"><span class="m" style="width:37%"></span><span class="g" style="width:38%"></span><span class="c" style="width:12%"></span><span class="p" style="width:13%"></span></div></td><td class="nums">3 · 3 · 1 · +1</td></tr>
+      <tr><td>E Долгое нажатие</td><td><div class="bar"><span class="m" style="width:57%"></span><span class="g" style="width:43%"></span></div></td><td class="nums">4 · 3 · 0</td></tr>
+      <tr><td>F Автозамена</td><td><div class="bar"><span class="m" style="width:27%"></span><span class="g" style="width:55%"></span><span class="c" style="width:9%"></span><span class="p" style="width:9%"></span></div></td><td class="nums">3 · 6 · 1 · +1</td></tr>
+      <tr><td>G Обучение</td><td><div class="bar"><span class="m" style="width:50%"></span><span class="g" style="width:50%"></span></div></td><td class="nums">3 · 3 · 0</td></tr>
+      <tr><td>H Языки</td><td><div class="bar"><span class="m" style="width:25%"></span><span class="g" style="width:25%"></span><span class="p" style="width:50%"></span></div></td><td class="nums">1 · 1 · 0 · +2</td></tr>
+      <tr><td>I Поля и трейты</td><td><div class="bar"><span class="m" style="width:57%"></span><span class="g" style="width:43%"></span></div></td><td class="nums">4 · 3 · 0</td></tr>
+      <tr><td>J Отклик и вид</td><td><div class="bar"><span class="m" style="width:80%"></span><span class="g" style="width:20%"></span></div></td><td class="nums">4 · 1 · 0</td></tr>
+      <tr><td>L Отсутствующие функции</td><td><div class="bar"><span class="m" style="width:14%"></span><span class="g" style="width:43%"></span><span class="c" style="width:43%"></span></div></td><td class="nums">1 · 3 · 3</td></tr>
+    </table>
+    <div class="legend"><span><i style="background:var(--good)"></i>совпадает</span><span><i style="background:var(--warn)"></i>разрыв</span><span><i style="background:var(--cant)"></i>невозможно для расширения</span><span><i style="background:var(--plus)"></i>Skald впереди</span></div>
+  </div>
+</section>
+
+<div class="callout" style="margin-top:22px">
+<strong>Статус на 17.09: P0, P1 и P2 выполнены</strong> и ушли в TestFlight сборками 13–15 — строка подсказок как у системы с заранее посчитанным исправлением, системная семантика backspace, Return как триггер, тайминги backspace, наложение касаний, точки касаний в скоринге, сокращения и i → I, умная пунктуация, имена из Контактов, сброс словаря, ускорение трекпада, динамические зоны клавиш, три звука клика, поиск эмодзи и оттенки кожи, .com по долгому нажатию, запоминание раскладки. Открытым остаётся P3: QuickPath и режим одной руки.
+</div>
+
+<h2 id="ceil"><span class="n">00</span>Потолок: что стороннее расширение не может по правилам iOS</h2>
+<p class="lede">Это не наши недоработки, а ограничения платформы, подтверждённые документацией Apple. Гнаться за ними бессмысленно; важно знать их, чтобы не обещать.</p>
+<ul class="plain">
+  <li><strong>Рисовать в поле ввода.</strong> Расширение рисует только внутри своей области. Поэтому нет серого встроенного предсказания, нет красного подчёркивания ошибок, нет подчёркивания исправленного слова с меню по тапу. Всё это у нас переезжает в строку подсказок.</li>
+  <li><strong>Выделять текст.</strong> Есть только перемещение каретки на N символов. Второй палец в трекпаде, двойной тап двумя пальцами, меню «Вырезать/Копировать» из клавиатуры невозможны.</li>
+  <li><strong>Видеть весь текст.</strong> Контекст ограничен текущим абзацем и устаревает после вставки или ввода с другой клавиатуры. Мягкие переносы строк невидимы, поэтому вертикальный трекпад по визуальным строкам можно только оценивать.</li>
+  <li><strong>Пароли и телефонные поля.</strong> Система сама подменяет нас своей клавиатурой.</li>
+  <li><strong>Системные штуки.</strong> Диктовка Apple, системная панель эмодзи и Memoji, открытие приложения из клавиатуры (сломано с iOS 18 и запрещено гайдлайнами), чтение системных настроек клавиатуры. Микрофон в нижней системной полосе на iPhone с Face ID при этом работает и с нашей клавиатурой.</li>
+  <li><strong>Без Full Access:</strong> нет сети, буфера обмена, хаптика и записи в App Group. Клавиатура обязана работать и без него (правило App Review 4.4.1).</li>
+  <li><strong>Память:</strong> около 60 МБ, при превышении процесс убивается молча. Наш словарь одного языка занимает около 10 МБ, держим не больше двух.</li>
+  <li><strong>Входные данные Apple.</strong> Система исправляет не по тексту, а по касаниям: точки нажатий, скрытое расширение зон вероятных клавиш (патент US 8,232,973), контекст получателя и приложения. Из готового текста это не воспроизвести, но точки касаний мы можем записывать сами.</li>
+</ul>
+
+<h2 id="a"><span class="n">A</span>Клавиши и касания</h2>
+<p class="verdict">Семантика совпадает. Два правила стоит поправить: порядок символов при быстром наборе двумя пальцами и возврат страницы после скольжения с ABC/#+=.</p>
+<div class="tblwrap"><table class="cmp">
+<tr><th>Пункт</th><th>Нативная</th><th>Skald</th><th>Вердикт</th><th>Правка</th></tr>
+<tr><td>Момент ввода буквы</td><td>По отпусканию; символ появляется через ~70 мс после отрыва пальца, в том же кадре исчезает попап <span class="conf">измерено</span></td><td>По отпусканию, без задержки; попап держится 100 мс</td><td><span class="v match">совпадает</span></td><td>Linger 100 → 70 мс</td></tr>
+<tr><td>Попап символа</td><td>Только буквы; ~1,7 ширины клавиши, ~55 pt над клавишей, радиус ~10, ножка в клавишу; у краёв экрана наклонён внутрь</td><td>Все символьные клавиши; max(1,7w, 46) × 2,35h, радиус 9, следует за пальцем; у краёв прижат, не наклонён</td><td><span class="v match">совпадает</span></td><td>Наклон у краёв, выключить на цифровой панели</td></tr>
+<tr><td>Shift / 123 / #+=</td><td>Срабатывают при касании; скольжение на букву даёт одну заглавную или одну цифру и возвращает слой</td><td>То же, но возврат страницы работает только со 123: после скольжения с ABC или #+= страница остаётся</td><td><span class="v gap">разрыв</span></td><td>P0, одна строка</td></tr>
+<tr><td>Наложение касаний</td><td>Второе касание при удержанной первой букве фиксирует первую: буквы вставляются в порядке нажатий</td><td>Каждый палец фиксирует букву по своему отпусканию: при быстром наборе порядок может перевернуться</td><td><span class="v gap">разрыв</span></td><td>P0: коммит первой буквы при втором touch-down</td></tr>
+<tr><td>Зоны попадания</td><td>Скрытые области клавиш растут по вероятности следующей буквы; визуально ничего не меняется; зона пробела растёт, когда слово вероятно закончено</td><td>Ближайшая клавиша в пределах 8 pt от границы, без вероятностей</td><td><span class="v gap">разрыв</span></td><td>P2: смещение по префиксным вероятностям словаря</td></tr>
+<tr><td>Двойной тап двумя пальцами</td><td>Выделяет последнее слово, тройной — предложение</td><td>Нет</td><td><span class="v cant">невозможно</span></td><td>Нет API выделения</td></tr>
+<tr><td>Нажатие служебных клавиш</td><td>Без попапа, инверсия цвета клавиши</td><td>Без попапа, затемнение/осветление <span class="k">#C9CBD1</span> / <span class="k">#6B6B6B</span></td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Скольжение на соседнюю клавишу</td><td>Печатается клавиша под точкой отпускания, попап следует за пальцем</td><td>То же</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Звук клика</td><td>Три сэмпла: буква, модификатор, удаление; молчит при выключенном звуке клавиатуры и тихом режиме</td><td>Один системный клик для всех клавиш, гейтится системой корректно</td><td><span class="v gap">разрыв</span></td><td>P2: SystemSoundID 1155/1156/1157, но они обходят настройку звука</td></tr>
+</table></div>
+
+<h2 id="b"><span class="n">B</span>Backspace</h2>
+<p class="verdict">Каденция посимвольного удаления совпадает, но старт раньше, переход к словам раньше, а слова у нас летят в три с половиной раза быстрее системы.</p>
+<div class="tblwrap"><table class="cmp">
+<tr><th>Пункт</th><th>Нативная</th><th>Skald</th><th>Вердикт</th><th>Правка</th></tr>
+<tr><td>Задержка до повтора</td><td>≈500 мс <span class="conf">измерено</span></td><td>400 мс</td><td><span class="v gap">разрыв</span></td><td>P0: 500 мс</td></tr>
+<tr><td>Посимвольный повтор</td><td>≈100 мс на символ</td><td>100 мс</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Переход к словам</td><td>После ≈20 символов (≈2,5 с от касания), далее ≈350 мс на слово</td><td>После 14 символов (≈1,8 с), далее 100 мс на слово</td><td><span class="v gap">разрыв</span></td><td>P0: 20 символов, 350 мс</td></tr>
+<tr><td>Отклик на каждое удаление</td><td>Клик и хаптик на каждый шаг</td><td>Клик и хаптик на каждый шаг</td><td><span class="v match">совпадает</span></td><td></td></tr>
+</table></div>
+
+<h2 id="c"><span class="n">C</span>Shift, Caps Lock, автозаглавные</h2>
+<p class="verdict">Совпадает почти всё. Две ошибки поведения: после Return без точки заглавная не включается, и автоshift самовольно возвращается после ручного выключения.</p>
+<div class="tblwrap"><table class="cmp">
+<tr><th>Пункт</th><th>Нативная</th><th>Skald</th><th>Вердикт</th><th>Правка</th></tr>
+<tr><td>Начало предложения</td><td>Заглавная после «. », «? », «! », в начале поля и после Return; после «:» и «;» нет; после открывающей кавычки в начале предложения — да</td><td>После «.!?» и пробела, в начале поля; после Return только если строка кончалась знаком; кавычки не учитываются</td><td><span class="v gap">разрыв</span></td><td>P0: после «\n» всегда; учитывать « " ( [</td></tr>
+<tr><td>Shift одноразовый</td><td>Сбрасывается после одной буквы; тап по автоshift выключает его</td><td>То же</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Caps Lock</td><td>Быстрый двойной тап, окно не опубликовано (≈0,3 с); иконка с подчёркиванием</td><td>0,3 с; <span class="k">capslock.fill</span></td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Скольжение с shift</td><td>Одна заглавная, состояние shift не меняется</td><td>То же</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Ручное выключение</td><td>Выключенный вручную shift остаётся выключенным, пока не изменится текст</td><td>Следующий колбэк хоста включает его снова, если каретка в начале предложения</td><td><span class="v gap">разрыв</span></td><td>P1: не перевзводить при неизменном контексте</td></tr>
+</table></div>
+
+<h2 id="d"><span class="n">D</span>Пробел, точка, трекпад</h2>
+<p class="verdict">Правила пробела совпадают. Трекпад работает, но грубее системного: нет ускорения от скорости пальца, клавиатура не светлеет, порог активации короче. Выделение вторым пальцем недоступно по API.</p>
+<div class="tblwrap"><table class="cmp">
+<tr><th>Пункт</th><th>Нативная</th><th>Skald</th><th>Вердикт</th><th>Правка</th></tr>
+<tr><td>Точка по двойному пробелу</td><td>«. » и заглавная; нужно слово перед кареткой; второй тап «сразу», окно не опубликовано</td><td>«. » и заглавная; нужно слово; окна нет, считаются подряд идущие нажатия</td><td><span class="v match">совпадает</span></td><td>Выключать в полях URL/email</td></tr>
+<tr><td>Возврат на буквы</td><td>Пробел после цифры или знака на слое 123 возвращает ABC</td><td>После знака препинания и пробела</td><td><span class="v match">совпадает</span></td><td>Добавить цифры</td></tr>
+<tr><td>Активация трекпада</td><td>Удержание пробела, оценка 0,4–0,5 с; клавиши пустеют, клавиатура светлеет</td><td>0,35 с; подписи букв и пробела исчезают, фон не меняется</td><td><span class="v gap">разрыв</span></td><td>P1: 0,45 с, осветление</td></tr>
+<tr><td>Отображение движения</td><td>Относительное, с ускорением: медленно ≈1 символ на ~5 pt, быстро в разы дальше; обе оси одновременно</td><td>8 pt на символ без ускорения; вертикаль только при явно вертикальном движении (|dy| &gt; 1,5|dx|), 28 pt на строку</td><td><span class="v gap">разрыв</span></td><td>P1: усиление от скорости, 5–6 pt/символ</td></tr>
+<tr><td>Вертикаль по строкам</td><td>По визуальным строкам, включая мягкие переносы; у края поля прокрутка</td><td>По реальным переносам плюс оценка переноса каждые 38 символов (80 в ландшафте)</td><td><span class="v gap">разрыв</span></td><td>Ограничение API; уточнять оценку по ширине поля нельзя</td></tr>
+<tr><td>Выделение вторым пальцем</td><td>Второй палец удерживает клавиатуру, первый двигает границу выделения</td><td>Нет</td><td><span class="v cant">невозможно</span></td><td></td></tr>
+<tr><td>Отпускание</td><td>Пробел не вставляется</td><td>Не вставляется</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Смена раскладки свайпом по пробелу</td><td>Нет; смена через глобус</td><td>Влево/вправо по списку раскладок, стрелки-подсказки на клавише</td><td><span class="v plus">Skald впереди</span></td><td></td></tr>
+</table></div>
+
+<h2 id="e"><span class="n">E</span>Долгое нажатие и раскладки</h2>
+<p class="verdict">Раскладки и альтернативы для русского и украинского совпадают с системой. Задержка у нас короче системной, и нет отмены уходом пальца с попапа.</p>
+<div class="tblwrap"><table class="cmp">
+<tr><th>Пункт</th><th>Нативная</th><th>Skald</th><th>Вердикт</th><th>Правка</th></tr>
+<tr><td>Задержка</td><td>≈0,5 с; зависит от Accessibility → Haptic Touch</td><td>0,35 с</td><td><span class="v gap">разрыв</span></td><td>P0: 0,45–0,5 с</td></tr>
+<tr><td>Русская</td><td>11/11/9; ё на е, ъ на ь</td><td>11/11/9; ё на е, ъ на ь</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Украинская</td><td>По фото iOS 27: 12/12/10 с ї, апострофом и ґ. В источниках до iOS 18: 11/11/9, ї на і, ґ на г, апостроф только на 123; в iOS 18 убраны ъ/ы/э</td><td>12/12/10 как на фото iOS 27; плюс ї на і, ґ на г</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Английская</td><td>a c e i l n o s u y z + знаки; y → ý; $ → £ ¥ € ₩ ₹; &amp; → §</td><td>Почти то же; y → ÿ; $ → € £ ¥ ₴ ₽; &amp; без альтернатив</td><td><span class="v match">совпадает</span></td><td>ý, §</td></tr>
+<tr><td>Отпускание без выбора</td><td>Вставляется базовый символ; уход пальца с попапа и отпускание отменяет</td><td>Вставляется выбранный (по умолчанию базовый); уход не отменяет</td><td><span class="v gap">разрыв</span></td><td>P1: отмена при |dy| &gt; высоты попапа</td></tr>
+<tr><td>Точка в полях URL/email</td><td>Долгое нажатие даёт .com .net .org .edu …</td><td>Нет</td><td><span class="v gap">разрыв</span></td><td>P2</td></tr>
+<tr><td>Глобус</td><td>Долгое нажатие: список клавиатур, настройки, режим одной руки</td><td>На iPhone с Face ID глобус рисует система, всё это работает</td><td><span class="v match">совпадает</span></td><td></td></tr>
+</table></div>
+
+<h2 id="f"><span class="n">F</span>Автозамена</h2>
+<p class="verdict">Здесь самый важный разрыв, и он не в модели, а в подаче: система принимает решение до пробела и показывает его в строке. У нас решение считается после пробела и заранее не видно.</p>
+<div class="tblwrap"><table class="cmp">
+<tr><th>Пункт</th><th>Нативная</th><th>Skald</th><th>Вердикт</th><th>Правка</th></tr>
+<tr><td>Триггеры</td><td>Пробел, знак препинания, Return, тап по кандидату</td><td>Пробел и знаки «. , ? ! ; :»; Return не срабатывает</td><td><span class="v gap">разрыв</span></td><td>P0: Return</td></tr>
+<tr><td>Строка подсказок</td><td>Три слота: слева набранное «в кавычках», в центре подсвеченный кандидат, который применит пробел, справа альтернатива</td><td>Три слота без подсветки; набранное в кавычках первым только если слово неизвестно; порядок не обещает, что применит пробел</td><td><span class="v gap">разрыв</span></td><td>P0: подсвеченный центральный слот = будущее исправление</td></tr>
+<tr><td>Момент вычисления</td><td>Модель работает на каждом нажатии, к пробелу ответ готов; ввод не блокируется</td><td>Кандидаты считаются после пробела в фоне и применяются вдогонку</td><td><span class="v gap">разрыв</span></td><td>P0: считать при наборе с дебаунсом, пробел применяет готовое</td></tr>
+<tr><td>Что исправляется</td><td>Неизвестные слова; контекстные «известное → известное» и грамматика только для EN/FR/ES (трансформер iOS 17); для RU/UK — пословный движок без контекста</td><td>Неизвестные и редкие известные слова, кандидаты по расстоянию правки с весами соседних клавиш, контекст по биграммам для RU/UK/EN</td><td><span class="v plus">Skald впереди для RU/UK</span></td><td></td></tr>
+<tr><td>Геометрия касаний</td><td>Кандидаты взвешиваются близостью реальных точек касания к клавишам (патент, у Grammarly 26 признаков близости на точку)</td><td>Хранится только нажатая клавиша; соседство учитывается грубо (вес 3,0 против 0,7)</td><td><span class="v gap">разрыв</span></td><td>P1: записывать смещение касания по каждой букве слова</td></tr>
+<tr><td>Регистр и апострофы</td><td>i → I, имена из Контактов, dont → don't (79 токенов сокращений в модели)</td><td>Ничего: слова короче 3 букв не рассматриваются, апостроф в алфавите правок только на украинской раскладке</td><td><span class="v gap">разрыв</span></td><td>P1: таблица сокращений EN, апостроф для всех раскладок, i → I</td></tr>
+<tr><td>Отказы</td><td>ALL CAPS, цифры, URL, email, хэштеги не трогаются</td><td>То же: слово = только буквы, ALL CAPS пропускается</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Отмена исправления</td><td>Backspace просто удаляет пробел и снова предлагает набранное в строке; в iOS 17+ исправленное слово временно подчёркнуто, тап открывает меню с оригиналом; выбор оригинала обучает словарь</td><td>Backspace сразу после исправления возвращает набранное и обучает; тап внутрь слова показывает варианты с оригиналом первым</td><td><span class="v gap">решение</span></td><td>P1: выбрать семантику backspace, см. план</td></tr>
+<tr><td>Подчёркивание исправленного</td><td>Да, в поле ввода</td><td>Нет</td><td><span class="v cant">невозможно</span></td><td>Заменено подсказками по тапу</td></tr>
+<tr><td>Профанизмы</td><td>Не предлагаются как кандидаты; с iOS 17 система учится не исправлять их</td><td>Частотный список из субтитров содержит их, отдельного фильтра нет</td><td><span class="v match">совпадает</span></td><td>Личный словарь решает то же</td></tr>
+<tr><td>После правки слова</td><td>Повторный набор того же слова не исправляется снова</td><td>Исправляется снова, если не обучено</td><td><span class="v gap">разрыв</span></td><td>P1: не трогать слово, которое пользователь только что перенабрал</td></tr>
+</table></div>
+
+<h2 id="g"><span class="n">G</span>Обучение</h2>
+<p class="verdict">Сигналы обучения те же. Не хватает имён из Контактов, сброса словаря и защиты слова через пустой шорткат.</p>
+<div class="tblwrap"><table class="cmp">
+<tr><th>Пункт</th><th>Нативная</th><th>Skald</th><th>Вердикт</th><th>Правка</th></tr>
+<tr><td>Отклонение подсказки</td><td>Добавляет слово в словарь (задокументировано)</td><td>Откат или выбор оригинала добавляет в личный словарь, слово больше не исправляется</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Повторный набор</td><td>Постепенно: сначала не трогает, потом предлагает, потом исправляет к нему; порог не опубликован</td><td>Неизвестное слово, оставленное дважды, становится своим и появляется в подсказках</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Имена из Контактов</td><td>Известные слова, влияют на регистр</td><td>Не используются; лексикон запрашивается только ради замен текста</td><td><span class="v gap">разрыв</span></td><td>P1: имена из UILexicon в личный словарь</td></tr>
+<tr><td>Замена текста</td><td>Побеждает автозамену; фраза с пустым шорткатом защищает слово</td><td>Побеждает; пустой шорткат игнорируется</td><td><span class="v gap">разрыв</span></td><td>P1: защита слова</td></tr>
+<tr><td>Сброс словаря</td><td>Настройки → Сброс → Сбросить словарь клавиатуры</td><td>Нет интерфейса</td><td><span class="v gap">разрыв</span></td><td>P1: кнопка в приложении</td></tr>
+<tr><td>Глобальное обучение</td><td>Дифференциальная приватность, новые слова и эмодзи по локали</td><td>Не применимо</td><td><span class="v na">н/п</span></td><td></td></tr>
+</table></div>
+
+<h2 id="h"><span class="n">H</span>Языки</h2>
+<p class="verdict">По данным Apple на сегодня: для русского и украинского у системы есть автозамена и строка подсказок, но нет встроенных предсказаний, нет двуязычного ввода, а QuickPath есть только для русского.</p>
+<div class="tblwrap"><table class="cmp">
+<tr><th>Пункт</th><th>Нативная</th><th>Skald</th><th>Вердикт</th><th>Правка</th></tr>
+<tr><td>Автозамена RU/UK</td><td>Есть, пословная</td><td>Есть, с биграммным контекстом</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Переключение языков</td><td>Multilingual Typing не поддерживает ни один кириллический язык: RU⇄EN автоматически не бывает</td><td>Свайп по пробелу, словарь и автозамена следуют раскладке</td><td><span class="v plus">Skald впереди</span></td><td></td></tr>
+<tr><td>Перевод</td><td>Нет</td><td>Поле перевода, четыре движка, стили</td><td><span class="v plus">Skald впереди</span></td><td></td></tr>
+<tr><td>QuickPath</td><td>Русский с iOS 15; украинский нет</td><td>Нет</td><td><span class="v gap">разрыв</span></td><td>P3</td></tr>
+</table></div>
+
+<h2 id="i"><span class="n">I</span>Поля ввода и трейты</h2>
+<p class="verdict">Основные трейты читаются правильно. Не хватает умной пунктуации и слоя цифр для полей <span class="k">numbersAndPunctuation</span>.</p>
+<div class="tblwrap"><table class="cmp">
+<tr><th>Пункт</th><th>Нативная</th><th>Skald</th><th>Вердикт</th><th>Правка</th></tr>
+<tr><td>autocapitalizationType</td><td>none / words / sentences / allCharacters; игнорируется в numberPad и phonePad</td><td>Все четыре режима</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Автозамена выключена приложением</td><td>autocorrectionType .no выключает исправления; spellCheckingType .no прячет строку</td><td>Выключает исправления, замены и строку в secure/email/URL и при .no</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Умная пунктуация</td><td>Кавычки по локали (« » для RU/UK, “ ” для EN), «--» → тире, апостроф → ’</td><td>Нет</td><td><span class="v gap">разрыв</span></td><td>P1, дёшево</td></tr>
+<tr><td>numbersAndPunctuation, asciiCapable</td><td>Открывается слой 123; ASCII-раскладка</td><td>Игнорируются</td><td><span class="v gap">разрыв</span></td><td>P0, дёшево</td></tr>
+<tr><td>email / URL / twitter / webSearch</td><td>Дополнительные клавиши @ . / .com и свои слои цифр</td><td>@ . для email, . / для URL, @ # для twitter</td><td><span class="v match">совпадает</span></td><td>.com по долгому нажатию, P2</td></tr>
+<tr><td>Клавиша Return</td><td>Подписи по returnKeyType, синяя для действий, приглушена при пустом поле с enablesReturnKeyAutomatically</td><td>Подписи и синий цвет есть; приглушения нет</td><td><span class="v match">совпадает</span></td><td>Приглушение, P2</td></tr>
+<tr><td>Пароли и phonePad</td><td>Система подменяет клавиатуру своей</td><td>Наш код для них не выполняется</td><td><span class="v gap">разрыв</span></td><td>Убрать мёртвый код телефонной панели</td></tr>
+</table></div>
+
+<h2 id="j"><span class="n">J</span>Отклик и внешний вид</h2>
+<p class="verdict">Хаптик, звук и геометрия совпадают. Единственное: у системы хаптик по умолчанию выключен, у нас включён, и это осознанный выбор.</p>
+<div class="tblwrap"><table class="cmp">
+<tr><th>Пункт</th><th>Нативная</th><th>Skald</th><th>Вердикт</th><th>Правка</th></tr>
+<tr><td>Хаптик</td><td>Лёгкий тик на каждую клавишу, работает в тихом режиме; включается в Sounds &amp; Haptics, по умолчанию выключен</td><td><span class="k">.light</span>, интенсивность 0,8, на каждое касание и каждый повтор; свой переключатель, по умолчанию включён; только с Full Access</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Звук</td><td>Гейтится настройкой звука клавиатуры и тихим режимом</td><td>То же через <span class="k">playInputClick</span></td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Геометрия</td><td>iOS 26.4 (замер): клавиша 42 × ~33, шаг рядов 54, зазор 7, отступ 6, радиус 7; область клавиш 216 pt + строка 44</td><td>42 / 54 / 7 / 6 / 7; итого 257 pt против 260</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Цвета</td><td>Светлая: фон <span class="k">#DFE0E6</span>, клавиши белые; тёмная (iOS 27, фото): фон <span class="k">#212121</span>, все клавиши <span class="k">#454545</span>. Серые служебные клавиши исчезли в iOS 26</td><td>Те же значения</td><td><span class="v match">совпадает</span></td><td></td></tr>
+<tr><td>Ландшафт</td><td>Область клавиш 162 pt, шаг рядов 40</td><td>153 pt, шаг 40, свои размеры</td><td><span class="v gap">разрыв</span></td><td>Подогнать высоту, P2</td></tr>
+</table></div>
+
+<h2 id="l"><span class="n">L</span>Чего у Skald нет вовсе</h2>
+<div class="tblwrap"><table class="cmp">
+<tr><th>Функция</th><th>Нативная</th><th>Skald</th><th>Вердикт</th><th>Правка</th></tr>
+<tr><td>Встроенные серые предсказания</td><td>Только EN/FR/ES, iPhone 12+</td><td>Нет</td><td><span class="v cant">невозможно</span></td><td>Для RU/UK нет и у Apple</td></tr>
+<tr><td>Красное подчёркивание ошибок</td><td>Check Spelling</td><td>Нет</td><td><span class="v cant">невозможно</span></td><td></td></tr>
+<tr><td>Выделение текста из клавиатуры</td><td>Трекпад вторым пальцем, тапы двумя пальцами</td><td>Нет</td><td><span class="v cant">невозможно</span></td><td></td></tr>
+<tr><td>QuickPath</td><td>RU да, UK нет</td><td>Нет</td><td><span class="v gap">разрыв</span></td><td>P3: свой декодер, как у Grammarly</td></tr>
+<tr><td>Поиск эмодзи, оттенки кожи</td><td>Поле поиска, долгое нажатие для вариантов</td><td>Сетка с категориями и недавними</td><td><span class="v gap">разрыв</span></td><td>P2</td></tr>
+<tr><td>Режим одной руки</td><td>Долгое нажатие глобуса</td><td>Нет</td><td><span class="v gap">разрыв</span></td><td>P3</td></tr>
+<tr><td>Диктовка</td><td>Кнопка микрофона</td><td>Микрофон в системной нижней полосе на Face ID iPhone работает и с нами</td><td><span class="v match">совпадает</span></td><td></td></tr>
+</table></div>
+
+<h2 id="road"><span class="n">→</span>План закрытия разрыва</h2>
+<p class="lede">Порядок по соотношению «насколько заметно пользователю» к «сколько работы». P0 закрывается за один-два дня и меняет ощущение сильнее всего.</p>
+<div class="road">
+  <div class="card">
+    <h3><span class="tag">P0</span>Ощущение системной</h3>
+    <div class="eff">1–2 дня</div>
+    <ul>
+      <li><strong>Строка как у Apple:</strong> кандидат считается во время набора с дебаунсом 120–150 мс, показывается подсвеченным в центре; пробел, знак и Return применяют ровно его. Слева всегда набранное в кавычках, когда оно отличается. Убирает и задержку, и «сюрпризы».</li>
+      <li>Return как триггер автозамены; заглавная после Return.</li>
+      <li>Backspace: 500 мс старт, слова после 20 символов по 350 мс.</li>
+      <li>Наложение касаний: второе касание фиксирует первую букву.</li>
+      <li>Скольжение с ABC/#+= возвращает страницу; попап 70 мс; долгое нажатие 0,45 с; трекпад 0,45 с.</li>
+      <li>numbersAndPunctuation открывает 123.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3><span class="tag">P1</span>Качество исправлений</h3>
+    <div class="eff">3–5 дней</div>
+    <ul>
+      <li><strong>Точки касаний в скоринге:</strong> хранить смещение пальца по каждой букве текущего слова и взвешивать кандидатов близостью. Это главный рычаг, которым пользуются и Apple, и Grammarly.</li>
+      <li>Сокращения и апострофы для EN (dont, cant, im, ive, youre…), апостроф в алфавите правок для всех раскладок, i → I.</li>
+      <li>Умная пунктуация по языку раскладки: « » / “ ”, «--» → «—», ’.</li>
+      <li>Имена из Контактов через UILexicon в личный словарь; защита слова пустым шорткатом; кнопка «Сбросить выученные слова» в приложении.</li>
+      <li>Не исправлять повторно слово, которое пользователь только что перенабрал; не перевзводить shift после ручного выключения.</li>
+      <li>Трекпад: ускорение от скорости, 5–6 pt на символ, осветление клавиатуры.</li>
+      <li><strong>Решение по backspace</strong> (см. ниже).</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3><span class="tag">P2</span>Детали</h3>
+    <div class="eff">по мере сил</div>
+    <ul>
+      <li>Динамические зоны попадания по вероятности следующей буквы из префиксного словаря.</li>
+      <li>Три звука клика вместо одного (с оговоркой: системные ID обходят настройку звука).</li>
+      <li>Поиск эмодзи и оттенки кожи; .com по долгому нажатию в URL-полях; наклон попапа у краёв; приглушённый Return при пустом поле; высота в ландшафте 162 pt.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3><span class="tag">P3</span>Большие куски</h3>
+    <div class="eff">недели</div>
+    <ul>
+      <li>QuickPath: свой декодер жестов; у Apple для украинского его нет, для русского есть.</li>
+      <li>Режим одной руки.</li>
+      <li>Догрузка словарей в приложении, если языков станет больше трёх.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="callout warn">
+<strong>Одно решение за тобой: что делает backspace сразу после автозамены.</strong><br>
+Нативно он просто удаляет пробел, а набранное слово снова появляется слева в строке подсказок; чтобы вернуть его, нужен второй тап. У нас backspace возвращает набранное сразу и запоминает его. Наш вариант быстрее, системный привычнее. Если цель «не отличить от системной», переключаемся на системный: удаляем пробел, показываем оригинал в строке, обучаем по тапу.
+</div>
+
+<h2 id="src"><span class="n">i</span>Метод и источники</h2>
+<p>Четыре параллельных исследования: автозамена и обучение, механика касаний и курсора, инвентарь настроек с границами API расширений, и аудит кода Skald по той же схеме. Каждому факту присвоена степень уверенности: <em>документировано</em> Apple, <em>измерено/наблюдено</em> надёжным источником, <em>выведено</em>. Цифры, которых Apple не публикует (порог активации трекпада, окно двойного пробела, окно Caps Lock, коэффициент ускорения курсора), в таблицах помечены как оценки. Метрики iOS 26.4 сняты нами по пикселям с симулятора, тёмная тема — с фото iOS 27.</p>
+<p>Полные отчёты лежат в репозитории: <span class="k">SkaldMobile/docs/research/autocorrect.md</span>, <span class="k">touch-mechanics.md</span>, <span class="k">settings-and-limits.md</span>, <span class="k">skald-current.md</span>. Ключевые внешние источники:</p>
+<ul class="src">
+  <li><a href="https://support.apple.com/en-us/104995">Apple: Auto-Correction and predictive text</a></li>
+  <li><a href="https://support.apple.com/guide/iphone/type-with-the-onscreen-keyboard-iph3c50f96e/ios">Apple: Type with the onscreen keyboard</a></li>
+  <li><a href="https://support.apple.com/guide/iphone/select-edit-and-move-text-iph1a9cae52c/ios">Apple: Select, edit and move text (trackpad)</a></li>
+  <li><a href="https://www.apple.com/ios/feature-availability/">Apple: iOS feature availability by language</a></li>
+  <li><a href="https://patents.google.com/patent/US8232973B2/en">Патент US 8,232,973: динамические зоны клавиш</a></li>
+  <li><a href="https://patents.google.com/patent/US9639184B2/en">Патент US 9,639,184: трекпад на клавиатуре</a></li>
+  <li><a href="https://jackcook.com/2023/09/08/predictive-text.html">Jack Cook: разбор трансформера клавиатуры iOS 17</a></li>
+  <li><a href="https://machinelearning.apple.com/research/learning-with-privacy-at-scale">Apple ML: Learning with Privacy at Scale</a></li>
+  <li><a href="https://github.com/blinksh/blink/issues/1466">Измерение каденции backspace</a></li>
+  <li><a href="https://github.com/getdictus/dictus-ios/issues/507">Измерение времени попапа и коммита буквы</a></li>
+  <li><a href="https://developer.apple.com/library/archive/documentation/General/Conceptual/ExtensibilityPG/CustomKeyboard.html">Apple: Custom Keyboard programming guide</a></li>
+  <li><a href="https://developer.apple.com/documentation/uikit/uitextdocumentproxy">Apple: UITextDocumentProxy</a></li>
+  <li><a href="https://www.grammarly.com/blog/engineering/deep-learning-swipe-typing/">Grammarly Engineering: on-device typing models</a></li>
+  <li><a href="https://github.com/KeyboardKit/KeyboardKit">KeyboardKit: калиброванная имитация системной клавиатуры</a></li>
+</ul>
+
+<footer>Skald · SkaldMobile/docs/native-parity.html · собрано 17.09.2026</footer>
+</div>
