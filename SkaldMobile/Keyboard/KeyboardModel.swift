@@ -88,7 +88,7 @@ final class KeyboardModel: ObservableObject {
     /// Index into `suggestions` of the candidate a separator will apply.
     @Published var applyIndex: Int?
     /// Where the finger actually landed for each letter of the word being
-    /// typed: letter → proximity of nearby keys. Feeds the corrector.
+    /// typed: letter → Gaussian touch likelihood of nearby keys. Feeds the corrector.
     private var touchTrail: [(typed: Character, prox: [Character: Double])] = []
     private var pendingProximity: [Character: Double]?
     /// Context in which the user turned shift off by hand; auto-shift stays
@@ -555,7 +555,7 @@ final class KeyboardModel: ObservableObject {
             touchTrail.removeAll()
             guard let fix else {
                 if Autocorrect.shared.correctionWouldHaveConsidered(word, language: currentLanguage) {
-                    Autocorrect.shared.noteUnknownKept(word)
+                    Autocorrect.shared.noteUnknownKept(word, language: currentLanguage)
                 }
                 return false
             }
@@ -579,7 +579,7 @@ final class KeyboardModel: ObservableObject {
                 guard let self, gen == self.correctionGeneration, self.translateMode == inTranslateMode else { return }
                 guard let fix else {
                     if Autocorrect.shared.correctionWouldHaveConsidered(word, language: language) {
-                        Autocorrect.shared.noteUnknownKept(word)
+                        Autocorrect.shared.noteUnknownKept(word, language: language)
                     }
                     return
                 }

@@ -49,8 +49,8 @@ App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
   with the correction computed while typing, so space / punctuation / Return
   apply it instantly. Backspace after a correction only removes the
   separator and re-offers the typed word (quoted); retyping the same word is
-  not corrected again. Touch geometry feeds the corrector (finger proximity
-  to nearby keys per letter). English contractions (dont → don't, i → I),
+  not corrected again. Touch geometry feeds the corrector (per-letter touch
+  likelihoods, see P3 below). English contractions (dont → don't, i → I),
   Smart Punctuation (« » / “ ”, ‘ ’, -- → —), Contacts names and
   blank-shortcut Text Replacements as protected words, backspace speeds
   500 ms / 100 ms / words at 350 ms after 20 chars, rollover typing,
@@ -66,22 +66,45 @@ App Group: `group.com.ivshestakov.skald`. Team `975ZZPJQNB`, automatic signing.
   .org .ua .ru .edu" on long-press of "." in URL/email fields; the return
   key greys out and does nothing when the host asks for it on an empty field;
   landscape key area 162 pt; the chosen layout is remembered across sessions.
+- **P3 corrector rework (2026-09-21, build 16)** after on-device testing
+  showed far more typos than the system keyboard: (1) the touch model is
+  now Gaussian (σ = 0.45 key pitch, `KeyTouchUIView.touchLikelihood`,
+  measured at touch-down) and a substitution is weighted by the likelihood
+  ratio of the proposed key to the typed one — the old linear 1.4-key-width
+  falloff rated "hit the neighbouring key" below "inserted a random letter";
+  edit priors re-set for a touchscreen (dropped/stray tap 0.12,
+  transposition 0.05). (2) Frequency thresholds are shares of the corpus,
+  not absolute counts: the Ukrainian list has 30× fewer tokens than the
+  Russian one and the old `count ≥ 30` gate refused to correct into 73 % of
+  its words. (3) Russian lines in the Ukrainian list (ы э ъ ё) and vice
+  versa are ignored. (4) A word the corpus or `UITextChecker` vouches for is
+  never replaced any more (the bar still offers alternatives); a rare
+  corpus entry the checker rejects ("утебя", "наете") is corrected like an
+  unknown word. (5) `UITextChecker.guesses` supplies candidates for forms
+  the 50k list lacks, scored with the same touch model. (6) An unknown word
+  is learned after three keeps, and never when the system dictionary has a
+  one-edit fix for it. Synthetic check (`docs/research/autocorrect-sim.py`, 1500
+  one-key slips per language): Russian fixes 92 % → 97 %, wrong rewrites of
+  correctly typed rare words 3–5 % → ≤1.7 % (the system checker, which the
+  simulation does not model, protects more of them on device); Ukrainian
+  fixes 39 % → 96 %, "left as typed" 53 % → 1 %.
 - **Auto-correction & suggestions** (`Keyboard/Autocorrect.swift`):
   per-language frequency dictionaries (OpenSubtitles 2018 top-50k,
   `Keyboard/Resources/freq_*.txt`, CC-BY-SA) plus a **bigram model** built
   from the OpenSubtitles corpus (`bigrams_*.bin`, 300k pairs per language,
   built with `scratchpad/bigrams.py`), edit-distance candidates weighted by
-  key adjacency on the current layout, and the system `UITextChecker` as a
-  validity check. Candidates are scored by 0.75·P(word|previous) +
-  0.25·P(word), so context decides ("превет мир" → "привет"). Rare real
-  words are only overridden when context makes the fix ≥40× likelier.
+  the touch model above (static key adjacency when no touch data), the
+  system `UITextChecker` as a validity check and as a source of candidates
+  beyond the list. Candidates are scored by 0.75·P(word|previous) +
+  0.25·P(word), so context decides ("превет мир" → "привет"). Known words
+  are never overridden.
   Correction runs **in the background** on space/punctuation (typing never
   waits) and is applied only if the word is still right before the caret;
   backspace right after reverts it. **It learns**: a reverted correction or
   a "keep as typed" pick adds the word to your personal lexicon (never
   corrected again, offered in suggestions), a fix you pick from the bar is
-  remembered for that typo, and an unknown word you keep twice becomes
-  yours. Personal data lives in the App Group defaults.
+  remembered for that typo, and an unknown word you keep three times
+  becomes yours. Personal data lives in the App Group defaults.
   Top bar: while typing — the typed word (quoted if unknown) and the best
   fixes/completions; after a space — the three likeliest next words;
   **tap into a word** — alternatives for that word, and if Skald had
@@ -192,8 +215,7 @@ Group.
 
 ## Known gaps / next steps
 
-- Not tested on a physical device yet; the Apple (on-device) engine has not
-  been verified inside the extension at all.
+- The Apple (on-device) engine has not been verified inside the extension.
 - `documentContextBeforeInput` only reaches back to the current paragraph;
   multi-paragraph messages translate paragraph by paragraph.
 - No swipe typing; autocorrect is dictionary-based, not contextual.

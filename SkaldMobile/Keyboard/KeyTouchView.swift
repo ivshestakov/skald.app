@@ -32,7 +32,7 @@ struct KeyTouchView: UIViewRepresentable {
 final class KeyTouchUIView: UIView {
 
     weak var model: KeyboardModel?
-    var frames: [Key: CGRect] = [:]
+    var frames: [Key: CGRect] = [:] { didSet { if frames != oldValue { pitchCache = nil } } }
     /// Next-letter likelihood; a likely key's hidden hit area grows by up to
     /// 6 pt per side (Apple's dynamic key targets — the visuals never change).
     var letterBias: [Character: Double] = [:]
@@ -70,19 +70,48 @@ final class KeyTouchUIView: UIView {
         return key(at: point) != nil
     }
 
-    /// Proximity (0…1) of the point to each single-letter key within ~1.4 key
-    /// widths — the touch geometry the corrector uses for substitutions.
-    private func proximity(at p: CGPoint) -> [Character: Double] {
+    /// Centre-to-centre distance between neighbouring letter keys (x: within
+    /// a row, y: between rows), derived from the reported frames.
+    private var pitchCache: (x: CGFloat, y: CGFloat)?
+    private var pitch: (x: CGFloat, y: CGFloat) {
+        if let p = pitchCache { return p }
+        var xs: [CGFloat] = [], rowYs = Set<Int>()
+        let letters = frames.filter { if case .char(let g) = $0.key { return g.count == 1 } else { return false } }.values
+        for (_, fs) in Swift.Dictionary(grouping: letters, by: { Int($0.midY.rounded()) }) {
+            let mids = fs.map(\.midX).sorted()
+            for i in mids.indices.dropFirst() { xs.append(mids[i] - mids[i - 1]) }
+        }
+        for f in letters { rowYs.insert(Int(f.midY.rounded())) }
+        let ys = rowYs.sorted()
+        let dys = ys.indices.dropFirst().map { CGFloat(ys[$0] - ys[$0 - 1]) }
+        let p = (x: xs.isEmpty ? 36 : xs.sorted()[xs.count / 2], y: dys.isEmpty ? 54 : dys.sorted()[dys.count / 2])
+        pitchCache = p
+        return p
+    }
+
+    /// Gaussian touch likelihood (0…1) of the point for every letter key
+    /// within reach, in key-pitch units with σ = 0.45 pitch — the touch
+    /// model behind Apple's corrector. The corrector weighs a substitution
+    /// by the ratio of the intended key's likelihood to the typed key's, so
+    /// a tap on a key boundary makes the neighbour as likely as the key that
+    /// registered, and a tap in the middle of a key rules its neighbours
+    /// out (≈ 0.09) and the rest of the keyboard out entirely.
+    private func touchLikelihood(at p: CGPoint) -> [Character: Double] {
+        let (px, py) = pitch
         var out: [Character: Double] = [:]
-        var unit: CGFloat = 32
-        if let any = frames.first(where: { if case .char = $0.key { return true } else { return false } }) { unit = any.value.width }
         for (k, f) in frames {
             guard case .char(let g) = k, g.count == 1, let ch = g.lowercased().first, ch.isLetter else { continue }
-            let dx = (p.x - f.midX) / unit, dy = (p.y - f.midY) / (f.height * 1.15)
-            let d = (dx * dx + dy * dy).squareRoot()
-            if d < 1.4 { out[ch] = Double(max(0, 1 - d / 1.4)) }
+            let dx = Double((p.x - f.midX) / px), dy = Double((p.y - f.midY) / py)
+            let likelihood = exp(-(dx * dx + dy * dy) / (2 * 0.45 * 0.45))
+            if likelihood >= 0.001 { out[ch] = likelihood }
         }
         return out
+    }
+
+    /// Where the finger meant to land: the touch-down point, unless the
+    /// finger slid to another key on purpose (then the release point).
+    private func aimPoint(_ state: TouchState) -> CGPoint {
+        state.currentKey == state.startKey ? state.startPoint : state.lastPoint
     }
 
     private func key(at p: CGPoint) -> Key? {
@@ -129,7 +158,7 @@ final class KeyTouchUIView: UIView {
                     other.longPressWork?.cancel()
                     other.committed = true
                     model.keyReleased(other.startKey, releasedOn: other.currentKey, start: other.startKey,
-                                      proximity: proximity(at: other.lastPoint))
+                                      proximity: touchLikelihood(at: aimPoint(other)))
                 }
             }
             let state = TouchState(startKey: key, point: p)
@@ -249,7 +278,7 @@ final class KeyTouchUIView: UIView {
             } else if state.swiped {
                 model.keyReleased(state.startKey, releasedOn: nil, start: state.startKey)
             } else {
-                let prox: [Character: Double]? = { if case .char? = state.currentKey { return proximity(at: state.lastPoint) } else { return nil } }()
+                let prox: [Character: Double]? = { if case .char? = state.currentKey { return touchLikelihood(at: aimPoint(state)) } else { return nil } }()
                 model.keyReleased(state.startKey, releasedOn: state.currentKey, start: state.startKey, proximity: prox)
             }
         }

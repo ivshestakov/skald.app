@@ -5,9 +5,11 @@ import UIKit
 /// The system keyboard's autocorrect is a private language model, so parity
 /// isn't possible from an extension. This gets close on the common case:
 /// a frequency dictionary per language (OpenSubtitles 2018, top 50k words),
-/// Norvig-style edit candidates weighted by how plausible the slip is on the
-/// current layout (adjacent keys, transpositions), and the system spell
-/// checker as a safety net so valid rarer words are left alone.
+/// Norvig-style edit candidates weighted by a touch model (how likely the
+/// finger that produced each letter was actually aiming at the proposed
+/// one), the system spell checker as a safety net so valid rarer words are
+/// left alone, and the system dictionary's own guesses for word forms the
+/// 50k list lacks.
 final class Autocorrect {
 
     static let shared = Autocorrect()
@@ -16,6 +18,16 @@ final class Autocorrect {
         let original: String
         let replacement: String
     }
+
+    // MARK: Thresholds
+
+    /// Frequency thresholds as a share of the corpus, so they mean the same
+    /// for every language: the Ukrainian list has 30× fewer tokens than the
+    /// Russian one, and absolute counts left half of its typos "too obscure
+    /// to fix". Calibrated on the Russian list (300 and 30 occurrences in
+    /// 144 M tokens).
+    private static let commonP = 2.1e-6      // trusted as is, no need to ask the system checker
+    private static let floorP  = 2.1e-7      // least frequency worth correcting into
 
     // MARK: Dictionaries
 
@@ -76,12 +88,23 @@ final class Autocorrect {
 
         func nextWords(after prev: String, limit: Int) -> [String] {
             guard let pi = ids[prev.lowercased()], let list = followers[Int32(pi)] else { return [] }
-            return list.prefix(limit).map { words[Int($0.0)] }
+            return list.lazy.map { self.words[Int($0.0)] }.filter { self.freq[$0] != nil }.prefix(limit).map { $0 }
         }
     }
 
     private var dictionaries: [Language: Dictionary] = [:]
     private let lock = NSLock()
+
+    /// Lines of the subtitle lists that belong to the other language (the
+    /// Ukrainian corpus is full of Russian subtitles): kept for bigram id
+    /// alignment, never offered or protected.
+    private static func isJunk(_ word: String, for language: Language) -> Bool {
+        switch language {
+        case .ukrainian: return word.contains { "ыэъё".contains($0) }
+        case .russian:   return word.contains { "іїєґ".contains($0) }
+        default:         return false
+        }
+    }
 
     /// Loads the list for `language` (cached). ~50k lines, a few ms.
     private func dictionary(for language: Language) -> Dictionary? {
@@ -95,7 +118,9 @@ final class Autocorrect {
         for line in text.split(separator: "\n") {
             let parts = line.split(separator: " ", maxSplits: 1)
             if parts.count == 2, let c = Int(parts[1]) {
-                let w = String(parts[0]); freq[w] = c; words.append(w)
+                let w = String(parts[0])
+                words.append(w)
+                if !Self.isJunk(w, for: language) { freq[w] = c }
             }
         }
         let d = Dictionary(words: words, freq: freq)
@@ -127,7 +152,7 @@ final class Autocorrect {
     private(set) var personalWords: [String: Int] = [:]
     /// Fixes you picked from the suggestion bar: typed (lowercased) → chosen.
     private(set) var personalFixes: [String: String] = [:]
-    /// Unknown words typed once — the second time they graduate to personalWords.
+    /// Unknown words left as typed — the third time they graduate to personalWords.
     private var seenUnknown: [String: Int] = [:]
 
     private let settings = SkaldSettings.shared
@@ -157,11 +182,21 @@ final class Autocorrect {
         settings.learnedWords = personalWords
     }
 
-    /// An unknown word was left as typed (no correction applied). Twice → learned.
-    func noteUnknownKept(_ word: String) {
+    /// An unknown word was left as typed (no correction applied). Three
+    /// times → learned, unless the system dictionary has a one-edit fix for
+    /// it: that is a typo we failed to place, not vocabulary. The checker
+    /// call runs off the main thread; the lexicon is touched on it.
+    func noteUnknownKept(_ word: String, language: Language) {
         let w = word.lowercased()
-        seenUnknown[w, default: 0] += 1
-        if seenUnknown[w]! >= 2 { learnWord(w); seenUnknown.removeValue(forKey: w) }
+        guard w.count >= 2 else { return }
+        DispatchQueue.global(qos: .utility).async { [self] in
+            if let guesses = systemGuesses(w, language: language),
+               guesses.contains(where: { Self.editDistance($0.lowercased(), w, limit: 1) <= 1 }) { return }
+            DispatchQueue.main.async {
+                self.seenUnknown[w, default: 0] += 1
+                if self.seenUnknown[w]! >= 3 { self.learnWord(w); self.seenUnknown.removeValue(forKey: w) }
+            }
+        }
     }
 
     /// Names from Contacts and words protected via Text Replacement (blank
@@ -192,27 +227,44 @@ final class Autocorrect {
         return dict.freq[lower] == nil && !isKnownToSystem(word, language: language)
     }
 
-    // MARK: System spell checker (validity only)
+    // MARK: System spell checker (validity + guesses)
 
     private let checker = UITextChecker()
+    private let checkerLock = NSLock()      // UITextChecker is not documented thread-safe
+    private static var checkerLanguages: [Language: String?] = [:]
 
     private static func checkerLanguage(for language: Language) -> String? {
+        if let cached = checkerLanguages[language] { return cached }
         let available = UITextChecker.availableLanguages
-        if available.contains(language.rawValue) { return language.rawValue }
-        return available.first { $0.hasPrefix(language.rawValue + "_") || $0.hasPrefix(language.rawValue + "-") }
+        let found: String? = available.contains(language.rawValue) ? language.rawValue
+            : available.first { $0.hasPrefix(language.rawValue + "_") || $0.hasPrefix(language.rawValue + "-") }
+        checkerLanguages[language] = found
+        return found
     }
 
     private func isKnownToSystem(_ word: String, language: Language) -> Bool {
         guard let lang = Self.checkerLanguage(for: language) else { return false }
+        checkerLock.lock(); defer { checkerLock.unlock() }
         let r = checker.rangeOfMisspelledWord(in: word, range: NSRange(location: 0, length: (word as NSString).length),
                                               startingAt: 0, wrap: false, language: lang)
         return r.location == NSNotFound
     }
 
+    /// The system dictionary's own fixes for a misspelled word. Covers the
+    /// forms the 50k list lacks (most of Ukrainian's inflections); ranked
+    /// by the system, re-scored here with the touch model.
+    private func systemGuesses(_ word: String, language: Language) -> [String]? {
+        guard let lang = Self.checkerLanguage(for: language) else { return nil }
+        checkerLock.lock(); defer { checkerLock.unlock() }
+        let range = NSRange(location: 0, length: (word as NSString).length)
+        return checker.guesses(forWordRange: range, in: word, language: lang)
+    }
+
     // MARK: Correction
 
     /// Best correction for a finished word, or nil to leave it alone.
-    /// `prev` is the word before it (context for the bigram model).
+    /// `prev` is the word before it (context for the bigram model);
+    /// `touches` the touch likelihoods recorded per typed letter.
     func correction(for word: String, prev: String?, language: Language, layout: LetterLayout,
                     touches: [[Character: Double]]? = nil) -> Correction? {
         guard word.allSatisfy({ $0.isLetter || $0 == "'" || $0 == "’" || $0 == "-" }) else { return nil }
@@ -228,39 +280,62 @@ final class Autocorrect {
         if let f = personalFixes[lower], dict.freq[f] != nil || isPersonal(f) {
             return Correction(original: word, replacement: Self.matchCase(of: word, to: f))
         }
+        // A word the corpus or the system dictionary vouches for is never
+        // replaced — like the system keyboard, alternatives go to the bar.
+        // A rare corpus entry the system rejects is subtitle junk or a typo
+        // that made it into the corpus ("утебя", "наете"): corrected like an
+        // unknown word, with a margin.
         let known = dict.freq[lower] != nil
-        if !known, isKnownToSystem(word, language: language) { return nil } // rarer but valid
-        // Known and reasonably common: leave it. Known but rare, lowercase,
-        // ≥4 letters: still a candidate for a context fix ("тепер" → "теперь").
-        if known, (dict.freq[lower]! >= 300 || word.first!.isUppercase || word.count < 4) { return nil }
+        if known, dict.pUni(lower) >= Self.commonP || word.first!.isUppercase || word.count < 4 { return nil }
+        if isKnownToSystem(word, language: language) { return nil }
 
         let adjacency = Self.adjacency(for: layout)
         let alphabet = Self.alphabet(for: layout)
-        var best: (word: String, score: Double)?
-        func consider(_ cand: String, weight: Double) {
-            guard dict.freq[cand] != nil else { return }
-            let s = dict.p(cand, after: prev) * weight
-            if best == nil || s > best!.score { best = (cand, s) }
-        }
         let touchMaps = (touches?.count == lower.count) ? touches : nil
-        for (cand, weight) in Self.edits1(lower, alphabet: alphabet, adjacency: adjacency, touches: touchMaps) {
-            consider(cand, weight: weight)
+        var best: (word: String, score: Double, inDictionary: Bool)?
+        func consider(_ cand: String, p: Double, weight: Double, inDictionary: Bool) {
+            let s = p * weight
+            if best == nil || s > best!.score { best = (cand, s, inDictionary) }
+        }
+        let first = Self.edits1(lower, alphabet: alphabet, adjacency: adjacency, touches: touchMaps)
+        for (cand, weight) in first where dict.freq[cand] != nil {
+            consider(cand, p: dict.p(cand, after: prev), weight: weight, inDictionary: true)
         }
         if best == nil, !known, lower.count >= 5 {
             // Second edit restricted to neighbouring keys: ~10× fewer candidates.
             var seen = Set<String>()
-            for (e1, w1) in Self.edits1(lower, alphabet: alphabet, adjacency: adjacency, touches: touchMaps) {
-                for (e2, w2) in Self.edits1(e1, alphabet: alphabet, adjacency: adjacency, narrow: true) where !seen.contains(e2) {
+            for (e1, w1) in first {
+                for (e2, w2) in Self.edits1(e1, alphabet: alphabet, adjacency: adjacency, narrow: true)
+                where !seen.contains(e2) && dict.freq[e2] != nil {
                     seen.insert(e2)
-                    consider(e2, weight: w1 * w2 * 0.05)
+                    consider(e2, p: dict.p(e2, after: prev), weight: w1 * w2 * 0.05, inDictionary: true)
                 }
             }
         }
+        // System-dictionary candidates: forms the list lacks. An unknown form
+        // competes like the rarest word we would still correct into, decaying
+        // down the system's ranking; the touch model decides between them.
+        if word.count >= 4, let guesses = systemGuesses(word, language: language) {
+            var firstWeight: [String: Double] = [:]
+            for (c, w) in first { firstWeight[c] = max(firstWeight[c] ?? 0, w) }
+            for (rank, guess) in guesses.prefix(6).enumerated() {
+                let g = guess.lowercased().replacingOccurrences(of: "’", with: "'")
+                guard g != lower, !g.isEmpty else { continue }
+                let weight: Double
+                if let w = firstWeight[g] { weight = w }
+                else if g.replacingOccurrences(of: " ", with: "") == lower { weight = 0.12 }   // утебя → у тебя
+                else if Self.editDistance(g, lower, limit: 2) == 2 { weight = 0.005 }
+                else { continue }
+                let inDict = dict.freq[g] != nil
+                let p = inDict ? dict.p(g, after: prev) : Self.floorP * pow(0.6, Double(rank))
+                consider(g, p: p, weight: weight, inDictionary: inDict)
+            }
+        }
         guard let b = best, b.word != lower else { return nil }
-        guard let f = dict.freq[b.word], f >= 30 else { return nil }         // nothing obscure
+        if b.inDictionary, dict.pUni(b.word) < Self.floorP { return nil }     // nothing obscure
         if known {
-            // Only override a real word when context makes the fix far likelier.
-            guard b.score > dict.p(lower, after: prev) * 40 else { return nil }
+            // Rare corpus entry the system rejects: still needs a clear margin.
+            guard b.score > dict.p(lower, after: prev) * 10 else { return nil }
         }
         return Correction(original: word, replacement: Self.matchCase(of: word, to: b.word))
     }
@@ -330,7 +405,7 @@ final class Autocorrect {
         if (!known || alwaysFixes), word.count >= 3 {
             let adjacency = Self.adjacency(for: layout)
             for (cand, w) in Self.edits1(lower, alphabet: Self.alphabet(for: layout), adjacency: adjacency) {
-                if dict.freq[cand] != nil, cand != lower { scored.append((cand, dict.p(cand, after: prev) * w * 2)) }
+                if dict.freq[cand] != nil, cand != lower { scored.append((cand, dict.p(cand, after: prev) * w * 6)) }
             }
         }
         var seen = Set<String>()
@@ -343,45 +418,76 @@ final class Autocorrect {
 
     // MARK: Edits
 
-    /// Single-edit candidates with a plausibility weight (higher = likelier slip).
-    /// `touches`, when present, holds for each typed letter the proximity
-    /// (0…1) of the finger to every nearby key; a substitution is then
-    /// weighted by how close the finger actually was to the proposed letter
-    /// instead of by static key adjacency.
+    /// Single-edit candidates with a plausibility weight — the probability
+    /// of the slip relative to a boundary tap on the right key (= 1).
+    /// Priors match a touchscreen: a neighbouring-key substitution is the
+    /// common slip, a dropped or stray tap is next, a transposition is rare.
+    /// `touches`, when present, holds for each typed letter the Gaussian
+    /// touch likelihood of every nearby key (see KeyTouchUIView); a
+    /// substitution is then weighted by the likelihood ratio of the proposed
+    /// key to the typed one, so a tap near a key boundary makes its
+    /// neighbour a strong candidate and a tap in the middle of a key does
+    /// not. Without touch data the static adjacency table stands in.
     private static func edits1(_ w: String, alphabet: [Character], adjacency: [Character: Set<Character>],
                                narrow: Bool = false, touches: [[Character: Double]]? = nil) -> [(String, Double)] {
         let chars = Array(w)
         var out: [(String, Double)] = []
         out.reserveCapacity(chars.count * (alphabet.count * 2 + 2))
         for i in 0...chars.count {
-            // deletion
+            // dropped tap
             if i < chars.count {
-                var d = chars; d.remove(at: i); out.append((String(d), 1.0))
+                var d = chars; d.remove(at: i); out.append((String(d), 0.12))
             }
             // transposition
             if i < chars.count - 1 {
-                var t = chars; t.swapAt(i, i + 1); out.append((String(t), 2.0))
+                var t = chars; t.swapAt(i, i + 1); out.append((String(t), 0.05))
             }
             let letters: [Character] = narrow
                 ? Array((i < chars.count ? adjacency[chars[i]] ?? [] : []).union(i > 0 ? adjacency[chars[i - 1]] ?? [] : []))
                 : alphabet
+            let nearPrev = i > 0 ? adjacency[chars[i - 1]] : nil
+            let nearHere = i < chars.count ? adjacency[chars[i]] : nil
             for c in letters {
-                // substitution — much likelier when the keys are neighbours
+                // substitution
                 if i < chars.count, c != chars[i] {
                     var s = chars; s[i] = c
                     let weight: Double
-                    if let t = touches, i < t.count {
-                        weight = 0.3 + 2.7 * (t[i][c] ?? 0)
+                    if let t = touches, i < t.count, let typed = t[i][chars[i]], typed > 0 {
+                        weight = min(1, max(0.001, (t[i][c] ?? 0) / typed))
                     } else {
-                        weight = (adjacency[chars[i]]?.contains(c) ?? false) ? 3.0 : 0.7
+                        weight = (nearHere?.contains(c) ?? false) ? 0.5 : 0.01
                     }
                     out.append((String(s), weight))
                 }
-                // insertion
-                var ins = chars; ins.insert(c, at: i); out.append((String(ins), 1.0))
+                // stray tap: likelier next to a key that was hit anyway
+                var ins = chars; ins.insert(c, at: i)
+                let near = (nearHere?.contains(c) ?? false) || (nearPrev?.contains(c) ?? false)
+                out.append((String(ins), near ? 0.12 : 0.02))
             }
         }
         return out
+    }
+
+    /// Optimal-string-alignment edit distance (insert, delete, substitute,
+    /// swap adjacent), capped at `limit + 1`.
+    static func editDistance(_ a: String, _ b: String, limit: Int) -> Int {
+        let a = Array(a), b = Array(b)
+        guard !a.isEmpty, !b.isEmpty else { return max(a.count, b.count) }
+        if abs(a.count - b.count) > limit { return limit + 1 }
+        var prev2: [Int] = [], prev = Array(0...b.count), cur = [Int](repeating: 0, count: b.count + 1)
+        for i in 1...a.count {
+            cur[0] = i
+            var rowMin = i
+            for j in 1...b.count {
+                let cost = a[i - 1] == b[j - 1] ? 0 : 1
+                var v = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+                if i > 1, j > 1, a[i - 1] == b[j - 2], a[i - 2] == b[j - 1] { v = min(v, prev2[j - 2] + 1) }
+                cur[j] = v; rowMin = min(rowMin, v)
+            }
+            if rowMin > limit { return limit + 1 }
+            prev2 = prev; prev = cur
+        }
+        return prev[b.count]
     }
 
     private static var alphabetCache: [String: [Character]] = [:]

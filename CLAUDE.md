@@ -111,6 +111,14 @@ feature list, build steps and gotchas.
   Setup tab is the test field. Simulator must have "Connect Hardware
   Keyboard" off. In the unsigned simulator build the extension can't read
   App Group settings (always starts with Google).
+- **Corrector rework (2026-09-21, build 16)** after Ivan's on-device test
+  ("много опечаток"): Gaussian touch model (σ 0.45 pitch, touch-down
+  point), edit priors for a touchscreen, corpus-relative frequency
+  thresholds (the Ukrainian list is 30× smaller — absolute counts broke
+  it), junk-line filter, known words never overridden, `UITextChecker.
+  guesses` as extra candidates, learning after 3 keeps. Numbers and the
+  simulation in `SkaldMobile/README.md` (P3 paragraph) and
+  `docs/research/autocorrect-sim.py`. Awaiting Ivan's verdict on device.
 - Behaviour decisions on file: native backspace semantics after autocorrect
   (delete the separator, re-offer the typed word quoted; retyping the same
   word is not corrected again); translation only on ↑, never live; controls
