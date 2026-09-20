@@ -98,11 +98,13 @@ feature list, build steps and gotchas.
   https://claude.ai/artifact/SCbUBVQrmV7trrUEofwqfB) + `docs/research/*.md`
   compares native behaviour with Skald item by item, lists what an
   extension can never do, and holds the P0–P3 plan. **P0, P1, P2 are done**
-  (builds 13–15, 2026-09-17). Open: **P3** — QuickPath slide-to-type (Apple
-  has it for RU, not UK) and one-handed mode; plus: run on a real device,
-  verify the Apple on-device engine inside the extension, App Store
-  listing (screenshots, privacy labels), merge `ios/keyboard-mvp` into
-  `main` (branch also carries the 0.4.1 Mac commit; no PR yet).
+  (builds 13–15, 2026-09-17); the corrector rework shipped in build 16
+  (2026-09-21) and Ivan is testing on his phone via TestFlight. Open:
+  **P3** — QuickPath slide-to-type (Apple has it for RU, not UK) and
+  one-handed mode; plus: verify the Apple on-device engine inside the
+  extension, App Store listing (screenshots, privacy labels). The iOS work
+  was merged into `main` on 2026-09-21; branch `ios/keyboard-mvp` is
+  retired — start new iOS branches from `main`.
 - Dev loop (simulator "iPhone 17 Pro", iOS 26.4 runtime — no iOS 27 runtime
   installed): `xcodegen generate` → `xcodebuild … CODE_SIGNING_ALLOWED=NO`
   → `simctl install` → kill the cached extension process
